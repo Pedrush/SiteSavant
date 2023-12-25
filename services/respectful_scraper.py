@@ -9,7 +9,10 @@ from urllib.robotparser import RobotFileParser
 from urllib.parse import urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
 from typing import Set
+from dotenv import load_dotenv
+from utils.utils import write_json_file
 
+# TODO: Make sure at runtime that the requests are only HTTPS
 
 
 def fetch_robots_txt(robots_url: str, user_agent: str) -> RobotFileParser:
@@ -59,6 +62,7 @@ def can_fetch(url: str, user_agent: str, robots_cache: dict = None) -> bool:
     In case of an error (such as failure in fetching or parsing robots.txt), the function logs the error
     and returns False. This is to ensure the continuity of the scraping process without interruption
     while still respecting the potential restrictions of the target website.
+    TODO: "http://example.com/privatepage.html" will wrongly be True when "User-agent: *\nDisallow: /private*/"
     """
     if robots_cache is None:
         robots_cache = {}
@@ -225,7 +229,7 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
     return combined_data
 
 
-def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: str = 'scraped_data', request_delay: float = 1) -> dict:
+def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: str = 'data/scraped_data', request_delay: float = 1) -> dict:
     """
     Scrapes websites starting from a list of given URLs or a single URL, respecting robots.txt rules, and retrieves text and metadata from each page.
     Note: The usage of a set for managing URLs to visit does not maintain the order of URLs, thereby not supporting ordered scraping methods like breadth-first or depth-first search.
@@ -234,7 +238,7 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
     - start_urls (str or list): The initial URL(s) to start scraping from. Can be a single URL or a list of URLs.
     - user_agent (str): The user agent string to be used for HTTP requests and robots.txt compliance.
     - max_depth (int, optional): The maximum depth to follow internal links for scraping. Defaults to 3.
-    - output_dir (str, optional): The directory where the scraped data JSON files will be stored. Defaults to 'scraped_data'.
+    - output_dir (str, optional): The directory where the scraped data JSON files will be stored. Defaults to 'data/scraped_data'.
     - request_delay (float, optional): Minimal delay in seconds between requests. Defaults to 1 second.
 
     Returns:
@@ -297,9 +301,8 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
             else:
                 visited.add(url)
 
-    with open(output_file, 'w', encoding='utf-8') as file:
-        json.dump(scraped_data, file, ensure_ascii=False, indent=4)
-
+    write_json_file(scraped_data, output_file)
+    
     return {
         'total_scraped': len(scraped_data),
         'total_visited': len(visited),
@@ -311,15 +314,15 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
 def main():
     logging.basicConfig(level=logging.INFO)
     setup_global_logger() 
-
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'local_config.json')
-    with open(config_path, 'r') as f:
-        local_config = json.load(f)
-        user_agent = local_config['USER_AGENT']
-        start_url= local_config['START_URL']
+    # Load the .env file
+    load_dotenv()
+    
+    # Get variables from .env file
+    user_agent = os.getenv('USER_AGENT')
+    start_url = os.getenv('START_URL')
 
     max_depth = 10  # Define the maximum depth for scraping
-    output_dir = 'scraped_data'  # Directory where the scraped data will be stored
+    output_dir = 'data/scraped_data'  # Directory where the scraped data will be stored
     request_delay = 0.3  # Minimal delay in seconds between requests
 
     # Start the scraping process

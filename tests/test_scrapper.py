@@ -1,6 +1,6 @@
 import pytest
 import requests_mock
-from sitesavant.respectful_scraper import can_fetch
+from services.respectful_scraper import can_fetch
 
 # TODO: extend tests to cover all functions in respectful_scraper.py
 
