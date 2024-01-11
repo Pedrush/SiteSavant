@@ -10,6 +10,8 @@ python = "^3.10"
 requests = "^2.31.0"
 bs4 = "^0.0.1"
 python-dotenv = "^1.0.0"
+cohere = "^4.39"
+pinecone-client = "^2.2.4"
 
 
 [tool.poetry.group.dev.dependencies]

@@ -1,17 +1,19 @@
-import json
 import logging
 import os
 import requests
+import time
+from tqdm import tqdm
 from abc import ABC, abstractmethod
 from typing import List
 from dotenv import load_dotenv
 from config.logging_config import setup_global_logger
 from utils.utils import read_json_file, write_json_file
 
+# TODO: JSON file with embeddings shouldn't repeat the whole text over and over again
 
 class TextProcessingService(ABC):
     @abstractmethod
-    def tokenize_text(self, text: str) -> List[str]:
+    def tokenize_text(self, text: str) -> List[int]:
         """
         Tokenizes the given text into a list of tokens.
         """
@@ -54,10 +56,12 @@ class CohereTextProcessingService(TextProcessingService):
         Raises:
             ValueError: If the text length exceeds the maximum limit.
             Exception: If there is an error in the tokenization process.
+        TODO: gracefully continue if the text length exceeds the maximum limit. Just log an error, inform about truncating, and continue.
         """
         max_length = 65536
         if len(text) > max_length:
-            raise ValueError(f"Text length exceeds the maximum limit of {max_length} characters.")
+            logging.warning(f"Text length exceeds the maximum limit of {max_length} characters. The cohere API doesn't handle more during tokenizetion. Text was therefore truncated to 65534 characters to meet the limit.")
+            text = text[0:65534]
 
         selected_model = model_name if model_name else self.model_name
 
@@ -89,6 +93,8 @@ class CohereTextProcessingService(TextProcessingService):
         selected_model = model_name if model_name else self.model_name
         data = {'tokens': tokens, 'model': selected_model}
 
+        time.sleep(1.2)
+        # logging.info(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         response = self.session.post(url, json=data)
 
         if response.status_code == 200:
@@ -96,12 +102,19 @@ class CohereTextProcessingService(TextProcessingService):
         else:
             raise Exception(f"Error detokenizing text: {response.text}")
 
-    def get_embeddings(self, text: str) -> List[float]:
+    def get_embeddings(self, text: str, input_type: str = 'search_document') -> List[float]:
         """
         Retrieves embeddings for the text using the Cohere API.
 
         Args:
             tokens (str): A string to embed.
+            input_type (str): Specifies the type of input you're giving to the model.
+            Defaults to 'search_document' to embed strings that can be later searched over.
+            Can be:
+            -'search_document', 
+            -'search_query', 
+            -'classification',
+            -'clustering'.
 
         Returns:
             List[float]: A list of embeddings.
@@ -112,7 +125,8 @@ class CohereTextProcessingService(TextProcessingService):
         url = 'https://api.cohere.ai/v1/embed'
         data = {
             'texts': [text],
-            'model': self.model_name
+            'model': self.model_name,
+            'input_type': input_type,
         }
         response = self.session.post(url, json=data)
         if response.status_code == 200:
@@ -154,13 +168,13 @@ def embed_file_contents(file_path: str, text_processor: TextProcessingService):
         return
 
     processed_data = []
-    for record in json_data:
+    for record in tqdm(json_data, desc="Processing records"):
         text = record.get("text", "")
         if text:
             try:
                 tokens = text_processor.tokenize_text(text)
                 token_chunks = chunk_tokens(tokens, max_embedding_model_input_length)
-                for chunk in token_chunks:
+                for chunk in tqdm(token_chunks, desc="Processing token chunks", leave=False):
                     detokenized_chunk = text_processor.detokenize_text(chunk)
                     embeddings = text_processor.get_embeddings(detokenized_chunk)
                     processed_record = {
@@ -179,6 +193,7 @@ def embed_file_contents(file_path: str, text_processor: TextProcessingService):
 
 def main(file_path: str, text_processor: TextProcessingService, processed_data_dir: str):
     processed_data = embed_file_contents(file_path, text_processor)
+    # TODO: write processed data to a file. It's better to store embeddings in, for example, a pickle/parquet file. JSON might hold references to these files inside of it. JSON is for the text data primarily, not long floats.
     if processed_data:
         output_file_name = os.path.basename(file_path).replace('.json', '_processed.json')
         output_file_path = os.path.join(processed_data_dir, output_file_name)
@@ -187,11 +202,17 @@ def main(file_path: str, text_processor: TextProcessingService, processed_data_d
     return processed_data
 
 if __name__ == "__main__":
+    # TODO: move all this stuff to the actual main function.
+    # Before running the script, make sure to set the following variables:
+    # model_name 
+    # input_type for embeddings (search_document, search_query, classification, clustering)
+    # scraped_data_file_path
+
+
     logging.basicConfig(level=logging.INFO)
     setup_global_logger() 
     load_dotenv()
 
-    # Moved constants inside the main block
     max_embedding_model_input_length = 512 # optimal size for optimizing embeddings quality as per https://docs.cohere.com/reference/embed
     processed_data_dir = "data/processed_data"
 
@@ -202,6 +223,12 @@ if __name__ == "__main__":
     scraped_data_file_path = os.getenv('SCRAPED_DATA_FILE_PATH')
     if not scraped_data_file_path:
         raise ValueError("SCRAPED_DATA_FILE_PATH not found in the environment variables.")
+
+    #TODO: Consider whether to use a context manager from within the class
+    #     @contextmanager
+    # def session(self):
+    #     with requests.Session() as session:
+    #         yield session
 
     with requests.Session() as session:
         session.headers.update({

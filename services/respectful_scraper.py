@@ -215,6 +215,7 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
     - This function is designed to be used in conjunction with a web scraping routine where the HTML content
       has already been fetched and parsed.
     - The quality and structure of the extracted data highly depend on the structure of the HTML content.
+    TODO: make sure the unicode characters are decoded before writing to JSON or before indexing in Pinecone.
     """
     text = extract_text(soup)
     metadata = extract_metadata(soup)
@@ -251,6 +252,7 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
     TODO: Fetch and respect crawl-delay from robots.txt.
     TODO: Consider refactoring to make the function more modular and reusable.
     TODO: Add support for scraping dynamic content loaded via JavaScript.
+    TODO: Don't get the internal links from the page of depth >= max_depth. They will be rejected anyway.
     """
 
     if not isinstance(start_urls, list):
@@ -291,7 +293,7 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
 
                         internal_links = get_internal_links(url, soup)
                         for link in internal_links:
-                            if link not in visited:
+                            if link not in visited and depth + 1 <= max_depth:
                                 to_visit.add((link, depth + 1))
                         time.sleep(request_delay)
                     else:
@@ -321,7 +323,7 @@ def main():
     user_agent = os.getenv('USER_AGENT')
     start_url = os.getenv('START_URL')
 
-    max_depth = 10  # Define the maximum depth for scraping
+    max_depth = 1  # Define the maximum depth for scraping
     output_dir = 'data/scraped_data'  # Directory where the scraped data will be stored
     request_delay = 0.3  # Minimal delay in seconds between requests
 
