@@ -1,47 +1,14 @@
 import logging
 import os
 import pinecone
+import re
 from dotenv import load_dotenv
 from config.logging_config import setup_global_logger
-from utils.utils import read_json_file
+from utils.utils import read_json_file, read_yaml_file, load_embeddings, join_data, validate_embeddings
 from typing import List, Tuple, Dict, Any
 from tqdm import tqdm
+from datetime import datetime
 
-def validate_embeddings(json_data: List[Dict[str, Any]]) -> None:
-    """
-    Validates the embeddings in the JSON data.
-
-    Args:
-        json_data (List[Dict[str, Any]]): A list of dictionaries containing embeddings.
-
-    Raises:
-        ValueError: If the data is empty, embeddings are not floats, or have inconsistent dimensions.
-
-    Ensures that all embeddings have the same dimensions and are of the correct type (float).
-    """
-    if not json_data:
-        raise ValueError("No data to validate.")
-
-    embedding_length = len(json_data[0]['embeddings'])
-    for record in json_data:
-        if not all(isinstance(x, float) for x in record['embeddings']):
-            raise ValueError("Embeddings must be floats.")
-        if len(record['embeddings']) != embedding_length:
-            raise ValueError("Inconsistent embedding dimensions found.")
-
-def init_pinecone() -> None:
-    """
-    Initializes the Pinecone environment.
-
-    Raises:
-        ValueError: If Pinecone API key is not found in environment variables.
-    """
-    pinecone_api_key = os.getenv('PINECONE_API_KEY')
-    pinecone_environment = os.getenv('PINECONE_ENVIRONMENT')
-    if not pinecone_api_key:
-        raise ValueError("PINECONE_API_KEY not found in the environment variables.")
-
-    pinecone.init(api_key=pinecone_api_key, environment=pinecone_environment)
 
 def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: str = 'cosine') -> pinecone.Index:
     """
@@ -74,12 +41,15 @@ def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: st
     return pinecone.Index(index_name)
 
 
-def process_metadata(record: Dict[str, Any]) -> Dict[str, Any]:
+def process_metadata(record: Dict[str, Any], metadata_to_extract: List[str] = None) -> Dict[str, Any]:
     """
-    Processes the metadata of a record, ensuring all values are of the correct type.
+    Processes the metadata of a record. If 'metadata_to_extract' is provided, 
+    extracts only the specified metadata fields. Otherwise, processes all fields in the record.
 
     Args:
         record (Dict[str, Any]): The record containing the metadata.
+        metadata_to_extract (List[str], optional): List of the metadata attributes to extract.
+            If None, all metadata fields in the record are processed.
 
     Returns:
         Dict[str, Any]: Processed metadata with valid types.
@@ -88,26 +58,34 @@ def process_metadata(record: Dict[str, Any]) -> Dict[str, Any]:
         ValueError: If metadata types are invalid.
     """
     meta = {}
+
     for key, value in record.items():
+        if metadata_to_extract and key not in metadata_to_extract:
+            continue 
+
         if key != 'embeddings':
             if value is None:
                 continue  # Skip null values
             elif isinstance(value, list):
-                meta[key] = [str(v) for v in value]
+                meta[key] = [str(v) for v in value]  # Convert all elements in list to string
             elif isinstance(value, (str, int, float, bool)):
                 meta[key] = value
             else:
                 raise ValueError(f"Invalid metadata type for key '{key}': {type(value)}")
-            
+
     logging.debug("Metadata processed successfully.")
     return meta
 
-def prepare_upsert_data(json_data: List[Dict[str, Any]]) -> List[Tuple[str, List[float], Dict[str, Any]]]:
+
+
+def prepare_upsert_data(embeddings_data: List[Dict[str, Any]], metadata_to_extract: List[str] = None) -> List[Tuple[str, List[float], Dict[str, Any]]]:
     """
     Prepares the data for upserting into Pinecone, ensuring metadata values are of the correct type.
 
     Args:
-        json_data (List[Dict[str, Any]]): The JSON data containing the embeddings and metadata.
+        embeddings_data (List[Dict[str, Any]]): The embeddings_data data containing the embeddings and metadata.
+        metadata_to_extract (List[str], optional): List of the metadata attributes to extract.
+            If None, all metadata fields in the record are processed.
 
     Returns:
         List[Tuple[str, List[float], Dict[str, Any]]]: Data formatted for upserting.
@@ -116,30 +94,32 @@ def prepare_upsert_data(json_data: List[Dict[str, Any]]) -> List[Tuple[str, List
         Ignores items with invalid metadata types and logs errors for them. Reports the count of processed and ignored items.
     """
     prepared_data = []
-    ignored_count = 0
+    skipped_count = 0
 
-    for i, record in enumerate(json_data):
+    for i, record in enumerate(embeddings_data):
         try:
-            meta = process_metadata(record)
-            prepared_data.append((str(i), record['embeddings'], meta))
+            metadata = process_metadata(record, metadata_to_extract)
+            embedding = tuple(record['embedding'])
+            id = str(i)
+            prepared_data.append((id, embedding, metadata))
         except ValueError as e:
             logging.error(f"Error processing record {i}: {e}")
-            ignored_count += 1
+            skipped_count += 1
 
     processed_count = len(prepared_data)
-    logging.info(f"Data preparation completed. Processed: {processed_count}, Ignored: {ignored_count}")
+    logging.info(f"Data preparation completed. Processed: {processed_count}, Skipped: {skipped_count}")
     
     return prepared_data
 
 
-def batch_upsert(index: pinecone.Index, data: List[Tuple[str, List[float], Dict[str, Any]]], batch_size: int = 128, one_by_one: bool = True) -> None:
+def batch_upsert(index: pinecone.Index, data: List[Tuple[str, List[float], Dict[str, Any]]], batch_size: int = 100, one_by_one: bool = False) -> None:
     """
     Batch upsert data into a Pinecone index, with an option to handle upserts individually or in batches.
 
     Args:
         index (pinecone.Index): The Pinecone index.
         data (List[Tuple[str, List[float], Dict[str, Any]]]): The data to upsert.
-        batch_size (int): The size of each batch.
+        batch_size (int): The size of each batch. Defaults to 100 as per Pinecone's recommendation.
         one_by_one (bool): If True, upserts items one by one for detailed error logging.
     """
     success_count = 0
@@ -169,39 +149,47 @@ def batch_upsert(index: pinecone.Index, data: List[Tuple[str, List[float], Dict[
     logging.info(f"Upsert completed. Success: {success_count}, Failed: {fail_count}")
 
 
-def main() -> None:
-    """
-    Main function to execute the script logic.
-    """
+def main():
+    # TODO: Write the docstring as in respectful_scraper.py
     logging.basicConfig(level=logging.INFO)
     setup_global_logger()
     load_dotenv()
 
-    embeddings_file_path = os.getenv('EMBEDDINGS_DATA_FILE_PATH')
-    if not embeddings_file_path:
-        raise ValueError("EMBEDDINGS_DATA_FILE_PATH not found in the environment variables.")
+    # Configuration parameters
+    config = read_yaml_file('config/parameters.yml')
+    indexing_embeddings_config = config['indexing_embeddings']
 
+    embeddings_file_path = indexing_embeddings_config.get('embeddings_file_path')
+    embeddings_metadata_file_path = indexing_embeddings_config.get('embeddings_metadata_file_path')
+    metadata_to_extract = indexing_embeddings_config.get('metadata_fields_to_extract')
+    index_name = indexing_embeddings_config.get('pinecone_index_name')
+    pinecone_environment = indexing_embeddings_config.get('pinecone_environment')
+    pinecone_api_key = os.getenv('PINECONE_API_KEY')
+
+    logging.info(f"Processing files:\n{embeddings_file_path}\n{embeddings_metadata_file_path}")
+
+    # Loading and validating data
     try:
-        json_embeddings_data = read_json_file(embeddings_file_path)
-        validate_embeddings(json_embeddings_data)
+        embeddings_metadata_json = read_json_file(embeddings_metadata_file_path)
+        embeddings_hdf5 = load_embeddings(embeddings_file_path)
+        embeddings_data = join_data(embeddings_metadata_json, embeddings_hdf5)
+        validate_embeddings(embeddings_data)
     except Exception as e:
         raise ValueError(f"Error processing file: {e}")
 
-    init_pinecone()
+    pinecone.init(api_key=pinecone_api_key, environment=pinecone_environment)
 
-    index_name = os.getenv('PINECONE_INDEX_NAME')
-    if not index_name:
-        raise ValueError("PINECONE_INDEX_NAME not found in the environment variables.")
-    embeddings_dimensions = len(json_embeddings_data[0]['embeddings'])
+    # Creating a Pinecone index
+    embeddings_dimensions = len(embeddings_data[0]['embedding'])
     index = replace_or_create_pinecone_index(index_name, embeddings_dimensions)
 
-    upsert_data = prepare_upsert_data(json_embeddings_data)
-    batch_upsert(index, upsert_data, batch_size=1)
+    # Upserting data into Pinecone
+    upsert_data = prepare_upsert_data(embeddings_data, metadata_to_extract)
+    batch_upsert(index, upsert_data, batch_size=1, one_by_one=True)
 
+    # Logging Pinecone index statistics
     index_stats = index.describe_index_stats()
-
     namespace_details = ', '.join([f"Namespace '{ns}': {stats['vector_count']} vectors" for ns, stats in index_stats['namespaces'].items()])
-
     log_message = (
         f"Pinecone Index Statistics:\n"
         f" - Dimensionality: {index_stats['dimension']} (Each vector has {index_stats['dimension']} elements)\n"
