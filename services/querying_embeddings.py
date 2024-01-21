@@ -2,61 +2,66 @@ import logging
 import os
 import pinecone
 import requests
+import datetime
 from dotenv import load_dotenv
 from config.logging_config import setup_global_logger
 from services.creating_embeddings import CohereTextProcessingService
-from services.indexing_embeddings import init_pinecone
-import datetime
+from utils.utils import read_yaml_file
 
+def main():
+    # TODO: Write the docstring as in respectful_scraper.py
 
-if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     setup_global_logger() 
     load_dotenv()
 
-    cohere_api_key = os.getenv('COHERE_API_KEY')
-    if not cohere_api_key:
-        raise ValueError("COHERE_API_KEY not found in the environment variables.")
+    # Configuration parameters
+    config = read_yaml_file('config/parameters.yml')
+    querying_embeddings = config['querying_embeddings']
 
-    query = "Who did aviva aquire for 100 milion pounds?"
+    pinecone_environment = querying_embeddings.get('pinecone_environment')
+    index_name = querying_embeddings.get('pinecone_index_name')
+    model_name = querying_embeddings.get('model_name')
+    query = querying_embeddings.get('query')
+    top_k = querying_embeddings.get('how_many_results_to_return')
+    pinecone_api_key = os.getenv('PINECONE_API_KEY')
+    cohere_api_key = os.getenv('COHERE_API_KEY')
 
     # Extract the first three words from the query for the filename
     query_for_filename = '_'.join(query.split()[:3])
 
+    # Embed the query
     with requests.Session() as session:
         session.headers.update({
             'Authorization': f'Bearer {cohere_api_key}',
             'Content-Type': 'application/json'
         })
         cohere_service = CohereTextProcessingService(session)
-        query_embeddings = cohere_service.get_embeddings(query, input_type='search_query')
+        query_embeddings = cohere_service.get_embeddings(query, model_name=model_name, embeddings_type='search_query')
     
     # Connect to Pinecone
-    init_pinecone()
-    index_name = os.getenv('PINECONE_INDEX_NAME')
-    if not index_name:
-        raise ValueError("PINECONE_INDEX_NAME not found in the environment variables.")
+    pinecone.init(api_key=pinecone_api_key, environment=pinecone_environment)
     index = pinecone.Index(index_name)
 
-    # Query your index (assuming you have an index object)
-    # Replace 'index' with your actual index object and its querying method
-result = index.query(query_embeddings, top_k=5, include_metadata=True)
+    # Query Pinecone index
+    result = index.query(query_embeddings, top_k=top_k, include_metadata=True)
 
-# Get the current date and time
-now = datetime.datetime.now()
+    # Format the date and time in a suitable format for a filename
+    # TODO: specify path: data/query_results as a parameter in parameters.yml
+    now = datetime.datetime.now()
+    filename = now.strftime(f"/root/repos/SiteSavant/data/query_results/{query_for_filename}_%Y-%m-%d_%H-%M.md")
 
-# Format the date and time in a suitable format for a filename
-# Example format: 'query_results_2024-01-09_13-45.md'
-filename = now.strftime(f"/root/repos/SiteSavant/data/query_results/{query_for_filename}_%Y-%m-%d_%H-%M.md")
+    # Open a Markdown file to write the results
+    with open(filename, 'w') as file:
+        # Write a header for the file
+        file.write(f'# Query Results: "{query}"\n\n')
+        
+        # Write each match to the file 
+        for match in result['matches']:
+            file.write(f"## Score: {match['score']:.2f}\n")
+            file.write(f"- **Text**: {match['metadata']['detokenized_chunk']}\n\n")
 
-# Open a Markdown file to write the results
-with open(filename, 'w') as file:
-    # Write a header for the file
-    file.write("# Query Results\n\n")
-    
-    # Write each match to the file 
-    for match in result['matches']:
-        file.write(f"## Score: {match['score']:.2f}\n")
-        file.write(f"- **Text**: {match['metadata']['detokenized_chunk']}\n\n")
+    logging.info(f"Results have been written to {filename}")
 
-logging.info(f"Results have been written to {filename}")
+if __name__ == "__main__":
+    main()
