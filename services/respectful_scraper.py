@@ -1,16 +1,21 @@
+# TODO: Organize imports according to PEP 8 standards: standard library imports, 
+# followed by related third-party imports, and then local application/library specific imports.
+
 import logging
 import time
 import requests
 import json
 from datetime import datetime
 import os
+import copy
 from config.logging_config import setup_global_logger
 from urllib.robotparser import RobotFileParser
 from urllib.parse import urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
 from typing import Set
 from dotenv import load_dotenv
-from utils.utils import write_json_file
+from utils.utils import write_json_file, read_yaml_file
+
 
 # TODO: Make sure at runtime that the requests are only HTTPS
 
@@ -83,7 +88,6 @@ def can_fetch(url: str, user_agent: str, robots_cache: dict = None) -> bool:
         return False
     else:
         is_allowed = rp.can_fetch(user_agent, url)
-        # logging.info(f"Scraping {'IS' if is_allowed else 'IS NOT'} allowed for: {url}") # Turned off for now
         return is_allowed
 
 
@@ -95,8 +99,8 @@ def get_internal_links(base_url: str, soup: BeautifulSoup) -> Set[str]:
     and checks if the links are internal, i.e., belonging to the same domain as the base URL.
     It normalizes both the base URL and each extracted link to ensure that differently formatted
     URLs pointing to the same resource are treated equally. The normalization includes
-    lowercasing the scheme and netloc components of the URLs and resolving relative URLs. 
-    The set data structure is used to avoid duplicate links.
+    lowercasing the scheme and netloc components of the URLs, resolving relative URLs, and 
+    removing fragments. The set data structure is used to avoid duplicate links.
 
     Parameters:
     - base_url (str): The base URL of the webpage. This is used to compare the domain of 
@@ -106,27 +110,21 @@ def get_internal_links(base_url: str, soup: BeautifulSoup) -> Set[str]:
     Returns:
     - set: A set of URLs (as strings) of internal links on the page. Each URL is normalized 
       to ensure uniqueness and correct identification of internal links.
-
-    Notes:
-    - This function is useful for web scraping tasks where understanding the internal link 
-      structure of a website is necessary.
-    - Normalization helps in treating different formats of the same URL as equivalent, thereby
-      improving the accuracy of internal link identification.
     """
     links = set()
     base_parsed_url = urlparse(base_url)
     base_netloc = base_parsed_url.netloc.lower()
 
-    # Normalize the base URL
-    normalized_base_url = urlunparse(base_parsed_url._replace(scheme=base_parsed_url.scheme.lower(), netloc=base_netloc))
+    # Normalize the base URL, including removing the fragment
+    normalized_base_url = urlunparse(base_parsed_url._replace(scheme=base_parsed_url.scheme.lower(), netloc=base_netloc, fragment=''))
 
     for link in soup.find_all('a', href=True):
         href = link['href']
         joined_url = urljoin(base_url, href)
         parsed_joined_url = urlparse(joined_url)
 
-        # Normalize the joined URL
-        normalized_url = urlunparse(parsed_joined_url._replace(scheme=parsed_joined_url.scheme.lower(), netloc=parsed_joined_url.netloc.lower()))
+        # Normalize the joined URL, including removing the fragment
+        normalized_url = urlunparse(parsed_joined_url._replace(scheme=parsed_joined_url.scheme.lower(), netloc=parsed_joined_url.netloc.lower(), fragment=''))
 
         # Check if the link is internal using the normalized URLs
         if urlparse(normalized_url).netloc == urlparse(normalized_base_url).netloc:
@@ -134,27 +132,52 @@ def get_internal_links(base_url: str, soup: BeautifulSoup) -> Set[str]:
 
     return links
 
-def extract_text(soup: BeautifulSoup) -> str:
+def extract_text(soup: BeautifulSoup, content_selectors=None) -> str:
     """
-    Efficiently extracts and returns the main textual content from a BeautifulSoup object.
-
-    This function removes script, style, and other non-relevant elements, and 
-    then extracts the remaining text using BeautifulSoup's get_text method, 
-    which is more efficient than manual iteration.
+    Extracts and returns the main textual content from a BeautifulSoup object, focusing on specified main content areas.
+    It avoids headers, footers, menus, and other non-essential sections. If the main content is not found using the provided
+    selectors, the function returns an empty string.
 
     Parameters:
     soup (BeautifulSoup): A BeautifulSoup object parsed from a webpage.
+    content_selectors (list, optional): A list of CSS selectors for targeting main content. If not provided, default selectors are used.
 
     Returns:
-    str: The extracted textual content as a single string.
-    TODO: Add support for extracting text from other elements such as tables, lists, etc.
-    TODO: Handle dynamic content loaded via JavaScript.
-    """
-    # Remove non-relevant elements
-    for element in soup(['script', 'style', 'head', 'title', 'meta', '[document]']):
-        element.decompose()
+    str: The extracted textual content as a single string, or an empty string if main content is not found.
+    TODO: Explictily handle dynamic content loaded via JavaScript.
 
-    text_content = soup.get_text(separator=' ', strip=True)
+    """
+    # Default selectors for main content if none are provided
+    if content_selectors is None:
+        content_selectors = [
+        'article',
+        '.article-content',
+        '.article_body',
+        '.post-content',
+        '.post-body',
+        '.main-content',
+        '.post',
+        'section.content',
+        'main[role="main"]',
+        '.info',
+        'aside',
+        '#main',
+        'div.content',
+        '.text-content',
+        '.entry-content',
+    ]  
+
+    main_content = []
+    for selector in content_selectors:
+        elements = soup.select(selector)
+        for element in elements:
+            main_content.append(element.get_text(separator=' ', strip=True))
+
+    if not main_content:
+        return ""
+
+    # Combine all text from the main content areas
+    text_content = '\n\n'.join(main_content)
 
     return text_content
 
@@ -208,15 +231,25 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
       'text' contains the main textual content, and 'scrape_timestamp' is the datetime when the scrape occurred.
       Other metadata are extracted based on the structure of the webpage.
 
-    Raises:
-    - This function does not raise any exceptions by itself but depends on the correct creation of the BeautifulSoup object.
-
-    Notes:
-    - This function is designed to be used in conjunction with a web scraping routine where the HTML content
-      has already been fetched and parsed.
-    - The quality and structure of the extracted data highly depend on the structure of the HTML content.
     TODO: make sure the unicode characters are decoded before writing to JSON or before indexing in Pinecone.
     """
+    exclusion_selectors = [
+        '.ad', '.advert', '.advertisement', '#ads', '.ads-banner',
+        'header', '.header', '#header',
+        '.breadcrumbs', '#breadcrumbs',
+        '.comments', '#comments', '.comment-section',
+        '.social-links', '.social-media', '#social-media',
+        'footer', '.footer', '.legal', '.disclaimer', '.terms', '.privacy-policy',
+        '#modal', '.modal', '.popup', '#popup',
+        'nav', '.navigation', 'nav.pagination', '.page-navigation',
+        '.author-info', '#author-bio',
+        '.sidebar', '.menu'
+    ]
+
+    for selector in exclusion_selectors:
+        for elem in soup.select(selector):
+            elem.extract()
+
     text = extract_text(soup)
     metadata = extract_metadata(soup)
 
@@ -252,7 +285,6 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
     TODO: Fetch and respect crawl-delay from robots.txt.
     TODO: Consider refactoring to make the function more modular and reusable.
     TODO: Add support for scraping dynamic content loaded via JavaScript.
-    TODO: Don't get the internal links from the page of depth >= max_depth. They will be rejected anyway.
     """
 
     if not isinstance(start_urls, list):
@@ -276,7 +308,7 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
 
         while to_visit:
             url, depth = to_visit.pop()
-            if depth > max_depth or url in visited:
+            if url in visited:
                 continue
 
             scraping_allowed = can_fetch(url, user_agent=user_agent, robots_cache=robots_cache)
@@ -286,21 +318,24 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
                     logging.info(f"Scraping {url} - depth: {depth}, visited: {len(visited)}, to_visit: {len(to_visit)}")
                     response = session.get(url)
                     if response.status_code == 200:
-                        soup = BeautifulSoup(response.content, 'html.parser')
+                        original_soup = BeautifulSoup(response.content, 'html.parser')
+                        soup = copy.deepcopy(original_soup)
                         page_data = scrape_page(soup, url)
                         scraped_data.append(page_data)
                         visited.add(url)
 
-                        internal_links = get_internal_links(url, soup)
-                        for link in internal_links:
-                            if link not in visited and depth + 1 <= max_depth:
-                                to_visit.add((link, depth + 1))
+                        if depth < max_depth:
+                            internal_links = get_internal_links(url, original_soup)
+                            for link in internal_links:
+                                if link not in visited:
+                                    to_visit.add((link, depth + 1))
                         time.sleep(request_delay)
                     else:
                         logging.error(f"Failed to fetch {url}: HTTP status code {response.status_code}")
                 except Exception as e:
                     logging.error(f"Error scraping {url}: {e}")
             else:
+                logging.warning(f"Scraping not allowed for {url}")
                 visited.add(url)
 
     write_json_file(scraped_data, output_file)
@@ -312,28 +347,64 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
     }
 
 
+# TODO: rozważyć format tradycyjny tego docstringa typu args, return itp
+# TODO: zadbać o logging poprawnie wykonanego skryptu, progres
 
 def main():
+    """
+    Main function to initiate the website scraping process.
+    It only scrapes sites within the same domain as the starting URL.
+
+    The function sets up logging, reads configuration parameters from a YAML file, 
+    and then initiates the scraping process based on these parameters. 
+    It concludes by logging the summary of the scraping results.
+
+    Configuration Parameters:
+    - `scraping_start_url` (str): The URL where the scraping process begins.
+    - `scraping_user_agent` (str): The User-Agent string to be used for HTTP requests. That is, how you introduce youself to the server.
+    - `scraping_max_depth` (int): This parameter determines how deep the scraper will navigate from the 
+      starting URL, following links within the site. It's an integer representing the levels of depth the 
+      scraper will traverse.
+
+      Explanation:
+      - Depth Level 0: The scraper starts at the `scraping_start_url`. No links from this page are followed.
+      - Depth Level 1: The scraper follows links found on the `scraping_start_url` page, scraping the 
+        content of these linked pages.
+      - Depth Level 2: In addition to level 1, the scraper also reaches links found on the "Depth Level 1" pages,
+        scraping their content as well, and so on.
+
+      For example, if `scraping_max_depth` is set to 2, the scraper will scrape the starting page, 
+      the pages linked directly from the starting page, and the pages linked from those pages.
+    - `scraping_request_delay` (float): Delay (in seconds) between consecutive HTTP requests to avoid overloading the server.
+    - `scraping_output_dir` (str): Directory path where the scraped data will be stored.
+
+    Logs:
+    After completion, the function logs:
+    - Total number of pages scraped.
+    - Total number of unique pages visited.
+    - The path to the file where the scraped data is stored.
+    """
+    # TODO: setup logging level as a parameter in the config file
     logging.basicConfig(level=logging.INFO)
     setup_global_logger() 
-    # Load the .env file
-    load_dotenv()
-    
-    # Get variables from .env file
-    user_agent = os.getenv('USER_AGENT')
-    start_url = os.getenv('START_URL')
 
-    max_depth = 1  # Define the maximum depth for scraping
-    output_dir = 'data/scraped_data'  # Directory where the scraped data will be stored
-    request_delay = 0.3  # Minimal delay in seconds between requests
+    # Configuration parameters
+    config = read_yaml_file('config/parameters.yml')
+    web_scraping_config = config['web_scraping']
 
-    # Start the scraping process
-    scraping_summary = scrape_website(start_url, user_agent, max_depth, output_dir, request_delay)
+    start_url = web_scraping_config.get('scraping_start_url')
+    user_agent = web_scraping_config.get('scraping_user_agent')
+    max_depth = web_scraping_config.get('scraping_max_depth')
+    request_delay = web_scraping_config.get('scraping_request_delay')
+    output_dir = web_scraping_config.get('scraping_output_dir')
 
-    # Print the summary of the scraping process
-    print(f"Scraping completed. Total pages scraped: {scraping_summary['total_scraped']}")
-    print(f"Total unique pages visited: {scraping_summary['total_visited']}")
-    print(f"Scraped data stored in: {scraping_summary['output_file']}")
+    # Scraping
+    scraping_result = scrape_website(start_url, user_agent, max_depth, output_dir, request_delay)
+
+    # Log the summary of the scraping process
+    logging.info(f"Scraping completed. Total pages scraped: {scraping_result['total_scraped']}")
+    logging.info(f"Total unique pages visited: {scraping_result['total_visited']}")
+    logging.info(f"Scraped data stored in: {scraping_result['output_file']}")
 
 if __name__ == "__main__":
     main()
