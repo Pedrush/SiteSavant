@@ -12,6 +12,8 @@ bs4 = "^0.0.1"
 python-dotenv = "^1.0.0"
 cohere = "^4.39"
 pinecone-client = "^2.2.4"
+h5py = "^3.10.0"
+faiss-cpu = "^1.7.4"
 
 
 [tool.poetry.group.dev.dependencies]
