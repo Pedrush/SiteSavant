@@ -25,14 +25,19 @@ def read_json_file(file_path: str) -> List[Dict[str, Any]]:
     except IOError as e:
         raise IOError(f"Error reading JSON file: {e}")
 
-def write_json_file(data: List[dict], output_file_path: str):
+def write_json_file(data: List[dict], output_file_path: str, timestamp: str = None):
     """
-    Writes the given data to a JSON file.
+    Writes the given data to a JSON file. Optionally appends a timestamp to the filename.
 
     Args:
         data (List[dict]): The data to write.
         output_file_path (str): The file path to write the data to.
+        timestamp (str, optional): Timestamp string to append to the filename.
     """
+    if timestamp:
+        file_name, file_extension = os.path.splitext(output_file_path)
+        output_file_path = f"{file_name}_{timestamp}{file_extension}"
+
     os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
     with open(output_file_path, 'w', encoding='utf-8') as file:
         json.dump(data, file, indent=4)
@@ -122,32 +127,32 @@ def validate_embeddings(embeddings_data: List[Dict[str, Any]]) -> None:
 def save_embeddings_and_metadata(
         data: List[Dict[str, Any]],
         data_dir: str,
-        metadata_file_name: str = 'metadata',
-        embeddings_file_name: str = 'embeddings',
+        metadata_file_name: str = 'processed_metadata',
+        embeddings_file_name: str = 'processed_embeddings_values',
+        timestamp: str = None
     ) -> None:
     """
-    Saves data into separate JSON and HDF5 files in the specified directory.
+    Saves data into separate JSON and HDF5 files in the specified directory. 
+    Optionally appends a timestamp to the filenames.
 
     Args:
-        data (List[Dict[str, Any]]): The data to be saved, each dict should contain 'embedding' key.
+        data (List[Dict[str, Any]]): The data to be saved.
         data_dir (str): The directory where the data will be saved.
         metadata_file_name (str): The desired file name of the metadata.
         embeddings_file_name (str): The desired file name of the embeddings.
+        timestamp (str, optional): Timestamp string to append to the filenames.
 
     Raises:
         ValueError: If data is empty or improperly formatted.
         IOError: If there's an error in file operations.
-
-    Returns:
-        None
     """
     if not data:
         raise ValueError("No data provided for saving.")
 
-    # Ensure the output directory exists
-    os.makedirs(data_dir, exist_ok=True)
+    if timestamp:
+        metadata_file_name += f"_{timestamp}"
+        embeddings_file_name += f"_{timestamp}"
 
-    # Constructing file paths for JSON and HDF5 files
     json_file_path = os.path.join(data_dir, f"{metadata_file_name}.json")
     hdf5_file_path = os.path.join(data_dir, f"{embeddings_file_name}.h5")
 
@@ -170,3 +175,25 @@ def save_embeddings_and_metadata(
     except Exception as e:
         logging.error(f"Error occurred while saving data: {e}")
         raise IOError("Failed to save data.") from e
+    
+def read_markdown_file(file_path: str) -> str:
+    """
+    Reads a Markdown file and returns its contents.
+
+    Args:
+        file_path (str): The path to the Markdown file.
+
+    Returns:
+        str: The contents of the Markdown file if successful, or an error message.
+
+    Raises:
+        FileNotFoundError: If the Markdown file does not exist.
+        Exception: For other issues that may occur while reading the file.
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return file.read()
+    except FileNotFoundError:
+        return "File not found."
+    except Exception as e:
+        return f"An error occurred: {e}"
