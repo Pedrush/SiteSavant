@@ -43,13 +43,13 @@ class CohereTextProcessingService(TextProcessingService):
             session: requests.Session, 
             model_name: str = 'embed-multilingual-v2.0', 
             max_embedding_model_input_length: int = 512,
-            embeddings_type: str = 'search_document', 
+            embedding_type: str = 'search_document', 
             ):
         
         self.session = session
         self.model_name = model_name
         self.max_embedding_model_input_length = max_embedding_model_input_length
-        self.embeddings_type = embeddings_type
+        self.embedding_type = embedding_type
 
     # TODO: Consider whether to use a context manager from within the class
     #     @contextmanager
@@ -173,36 +173,17 @@ def chunk_tokens(tokens: List[int], max_size: int, min_size: int = 0) -> List[Li
 
     return chunks
 
-def embed_file_contents(file_path: str, text_processor: TextProcessingService, max_embedding_model_input_length: int = 512) -> List[dict]:
+def embed_file_contents(json_data: dict, text_processor: TextProcessingService, max_embedding_model_input_length: int = 512) -> List[dict]:
     """
     Processes a single file by tokenizing, detokenizing, and obtaining embeddings for the text.
 
     Args:
-        file_path (str): The path of the file to process.
+        json_data (dict): A file to process.
         text_processor (TextProcessingService): The text processing service to use.
 
     Returns:
         List[dict]: A list of processed data records.
     """
-    logging.info(f"Processing file: {file_path}")
-    date_match = re.search(r'(\d{4})(\d{2})(\d{2})', file_path)
-    if date_match:
-        file_date = datetime(int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3)))
-        file_date_str = file_date.strftime("%d %B %Y")
-
-        # Log the date of the file being processed
-        logging.info(f"Processing file from {file_date_str}")
-
-        # Check if the file is from today
-        today = datetime.now().strftime("%Y-%m-%d")
-        if file_date_str != today:
-            logging.warning("The file processed is not from today.")
-    
-    try:
-        json_data = read_json_file(file_path)
-    except Exception as e:
-        logging.error(f"Error reading file: {e}")
-        return
 
     processed_data = []
     for record in tqdm(json_data, desc="Processing records"):
@@ -213,7 +194,7 @@ def embed_file_contents(file_path: str, text_processor: TextProcessingService, m
                 token_chunks = chunk_tokens(tokens, max_size=max_embedding_model_input_length, min_size=10)
                 for chunk in tqdm(token_chunks, desc="Processing token chunks", leave=False):
                     detokenized_chunk = text_processor.detokenize_text(chunk)
-                    embedding = text_processor.get_embeddings(detokenized_chunk)
+                    embedding = text_processor.get_embedding(detokenized_chunk)
                     processed_record = {
                         **record,  # Include original record data
                         'tokenized_chunk': chunk,
@@ -226,26 +207,24 @@ def embed_file_contents(file_path: str, text_processor: TextProcessingService, m
 
     return processed_data
 
+def create_embeddings(scraped_data, max_embedding_model_input_length, model_name, embedding_type, cohere_api_key):
+    """
+    Create embeddings from scraped data using the specified embedding model.
+    Note: The function is tightly coupled with CohereTextProcessingService.
 
-def main():
-    # TODO: Write the docstring as in respectful_scraper.py
-    # Initialize logging and load environment variables
-    logging.basicConfig(level=logging.INFO)
-    setup_global_logger() 
-    load_dotenv()
+    Args:
+    scraped_data (dict): The scraped data text for which embeddings are to be created.
+    model_name (str): The name of the Cohere model to use for embeddings.
+    max_embedding_model_input_length (int): Maximum length of the input to the embedding model in tokens.
+    embedding_type (str): The type of embeddings to use.
+    cohere_api_key (str): The API key for accessing Cohere's services.
 
-    # Configuration parameters
-    config = read_yaml_file('config/parameters.yml')
-    creating_embeddings_config = config['creating_embeddings']
-
-    scraped_data_file_path = creating_embeddings_config.get('input_scraped_data_file_path') # File path of the scraped data
-    max_embedding_model_input_length = creating_embeddings_config.get('max_embedding_model_input_length') # Maximum length of the input to the embedding model as measured in tokens
-    processed_data_dir = creating_embeddings_config.get('output_embedding_processed_data_dir') # Directory where the processed data will be saved
-    model_name = creating_embeddings_config.get('embedding_model_name') # Name of the embedding model to use
-    embeddings_type = creating_embeddings_config.get('embeddings_type') # Type of embeddings to use
-    cohere_api_key = os.getenv('COHERE_API_KEY') # Cohere API key
-
-    # Create a session and text processing service
+    Returns:
+    dict: Processed data containing embeddings and their metadata.
+    TODO:
+    - Decouple the function from CohereTextProcessingService
+    """
+    
     with requests.Session() as session:
         session.headers.update({
             'Authorization': f'Bearer {cohere_api_key}',
@@ -256,20 +235,51 @@ def main():
             session,
             model_name=model_name,
             max_embedding_model_input_length=max_embedding_model_input_length,
-            embeddings_type=embeddings_type,
+            embedding_type=embedding_type,
             )
 
         # Process the file and handle the data
         processed_data = embed_file_contents(
-            file_path=scraped_data_file_path,
+            json_data=scraped_data,
             text_processor=cohere_service,
             max_embedding_model_input_length=max_embedding_model_input_length,
         )
+
+    return processed_data
+    
+
+def main():
+    # TODO: Write the docstring as in respectful_scraper.py
+    # Initialize logging and load environment variables
+    logging.basicConfig(level=logging.INFO)
+    setup_global_logger() 
+    load_dotenv()
+
+    # Configuration parameters
+    config = read_yaml_file('config/parameters.yml')
+    embeddings_creator_config = config['embeddings_creator']
+
+    scraped_data_file_path = embeddings_creator_config.get('input_scraped_data_file_path') # File path of the scraped data
+    max_embedding_model_input_length = embeddings_creator_config.get('max_embedding_model_input_length') # Maximum length of the input to the embedding model as measured in tokens
+    processed_data_dir = embeddings_creator_config.get('output_embedding_processed_data_dir') # Directory where the processed data will be saved
+    model_name = embeddings_creator_config.get('embedding_model_name') # Name of the embedding model to use
+    embedding_type = embeddings_creator_config.get('embedding_type') # Type of embeddings to use
+    cohere_api_key = os.getenv('COHERE_API_KEY') # Cohere API key
+
+    logging.info(f"Processing file: {scraped_data_file_path}")
+    
+    try:
+        json_data = read_json_file(scraped_data_file_path)
+    except Exception as e:
+        logging.error(f"Error reading file: {e}")
+        return
+
+    embeddings_with_metadata = create_embeddings(scraped_data=json_data, max_embedding_model_input_length=max_embedding_model_input_length, model_name=model_name, embedding_type=embedding_type, cohere_api_key=cohere_api_key, processed_data_dir=processed_data_dir)
     
     # Save the processed data
-    if processed_data:
+    if embeddings_with_metadata:
         save_embeddings_and_metadata(
-            data=processed_data,
+            data=embeddings_with_metadata,
             data_dir=processed_data_dir,
             metadata_file_name='processed_metadata',
             embeddings_file_name='processed_embeddings_values'
