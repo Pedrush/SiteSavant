@@ -263,7 +263,7 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
     return combined_data
 
 
-def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: str = 'data/scraped_data', request_delay: float = 1) -> dict:
+def scrape_website(start_urls, user_agent: str, max_depth: int = 3, request_delay: float = 1) -> dict:
     """
     Scrapes websites starting from a list of given URLs or a single URL, respecting robots.txt rules, and retrieves text and metadata from each page.
     Note: The usage of a set for managing URLs to visit does not maintain the order of URLs, thereby not supporting ordered scraping methods like breadth-first or depth-first search.
@@ -272,11 +272,10 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
     - start_urls (str or list): The initial URL(s) to start scraping from. Can be a single URL or a list of URLs.
     - user_agent (str): The user agent string to be used for HTTP requests and robots.txt compliance.
     - max_depth (int, optional): The maximum depth to follow internal links for scraping. Defaults to 3.
-    - output_dir (str, optional): The directory where the scraped data JSON files will be stored. Defaults to 'data/scraped_data'.
     - request_delay (float, optional): Minimal delay in seconds between requests. Defaults to 1 second.
 
     Returns:
-    - dict: A summary of the scraping process, including counts of pages scraped and visited, and the path to the output file.
+    - dict: A summary of the scraping process, including counts of pages scraped and visited.
 
     Raises:
     - requests.RequestException: If an error occurs during the HTTP request to fetch webpage content.
@@ -285,18 +284,11 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
     TODO: Fetch and respect crawl-delay from robots.txt.
     TODO: Consider refactoring to make the function more modular and reusable.
     TODO: Add support for scraping dynamic content loaded via JavaScript.
+    TODO: Concatenate meta description with the fetched text
     """
 
     if not isinstance(start_urls, list):
         start_urls = [start_urls]
-
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # Extract domain from the first URL in the list
-    first_domain = urlparse(start_urls[0]).netloc.replace('.', '_')
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = os.path.join(output_dir, f'scraped_{first_domain}_{timestamp}.json')
 
     robots_cache = {}
     visited = set()
@@ -338,14 +330,16 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, output_dir: 
                 logging.warning(f"Scraping not allowed for {url}")
                 visited.add(url)
 
-    write_json_file(scraped_data, output_file)
-    
-    return {
+    scraping_result = {
+        'scraped_data': scraped_data,
         'total_scraped': len(scraped_data),
         'total_visited': len(visited),
-        'output_file': output_file
     }
 
+    logging.info(f"Scraping completed. Total pages scraped: {scraping_result['total_scraped']}")
+    logging.info(f"Total unique pages visited: {scraping_result['total_visited']}")
+
+    return scraping_result
 
 # TODO: rozważyć format tradycyjny tego docstringa typu args, return itp
 # TODO: zadbać o logging poprawnie wykonanego skryptu, progres
@@ -390,21 +384,18 @@ def main():
 
     # Configuration parameters
     config = read_yaml_file('config/parameters.yml')
-    web_scraping_config = config['web_scraping']
+    website_scraper_config = config['website_scraper']
 
-    start_url = web_scraping_config.get('scraping_start_url')
-    user_agent = web_scraping_config.get('scraping_user_agent')
-    max_depth = web_scraping_config.get('scraping_max_depth')
-    request_delay = web_scraping_config.get('scraping_request_delay')
-    output_dir = web_scraping_config.get('scraping_output_dir')
+    start_url = website_scraper_config.get('scraping_start_url')
+    user_agent = website_scraper_config.get('scraping_user_agent')
+    max_depth = website_scraper_config.get('scraping_max_depth')
+    request_delay = website_scraper_config.get('scraping_request_delay')
+    output_dir = website_scraper_config.get('scraping_output_dir')
 
     # Scraping
     scraping_result = scrape_website(start_url, user_agent, max_depth, output_dir, request_delay)
+    write_json_file(data=scraping_result['scraped_data'], output_file_path=scraping_result['output_file'])
 
-    # Log the summary of the scraping process
-    logging.info(f"Scraping completed. Total pages scraped: {scraping_result['total_scraped']}")
-    logging.info(f"Total unique pages visited: {scraping_result['total_visited']}")
-    logging.info(f"Scraped data stored in: {scraping_result['output_file']}")
 
 if __name__ == "__main__":
     main()
