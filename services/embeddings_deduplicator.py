@@ -50,7 +50,7 @@ def deduplicate_embeddings(records: List[dict], use_l2_similarity: bool, thresho
 
     Example:
     >>> records = [{'id': 1, 'embedding': [0.1, 0.2]}, {'id': 2, 'embedding': [0.1, 0.2]}, {'id': 3, 'embedding': [0.3, 0.4]}]
-    >>> unique_records, duplicates = deduplicate_embeddings(records, True, 0.05)
+    >>> unique_records, duplicates = embeddings_deduplicator(records, True, 0.05)
     TODO: Optimise computationally
     TODO: update docstring
     TODO: test if use_l2_similarity is working
@@ -114,6 +114,7 @@ def check_faiss_alignment(records: List[dict], index: faiss.IndexFlat) -> bool:
 
 def check_join_success(processed_data: List[Dict[str, any]], original_data: List[Dict[str, any]]) -> None:
     """
+    Runtime sanity check function.
     Verifies that each record in processed_data has a corresponding record in original_data with a matching embedding.
     Uses numpy.allclose to compare embeddings for floating-point precision tolerance.
 
@@ -144,6 +145,28 @@ def check_join_success(processed_data: List[Dict[str, any]], original_data: List
     # TODO: change to logging.debug
     logging.info("Join of deduplicated embeddings back to the records was successful.")
 
+def process_and_sort_duplicates(duplicate_records):
+    """
+    Function made to inspect what records were considered duplicate.
+    Extracts only the relevant information from the duplicate records
+    and sorts them based on the distance.
+
+    Args:
+        duplicate_records (list of tuples): A list containing tuples of (record1, record2, dist).
+
+    Returns:
+        list: Sorted list of duplicate records based on the distance.
+    """
+    for i, (record1, record2, dist) in enumerate(duplicate_records):
+        record1 = {k: v for k, v in record1.items() if k in ['detokenized_chunk', 'url']}
+        record2 = {k: v for k, v in record2.items() if k in ['detokenized_chunk', 'url']}
+        dist = float(dist)
+        duplicate_records[i] = (record1, record2, dist)
+
+    sorted_duplicate_records = sorted(duplicate_records, key=lambda x: x[2])
+    return sorted_duplicate_records
+
+
 
 def main():
     logging.basicConfig(level=logging.INFO)
@@ -152,15 +175,15 @@ def main():
 
     # Configuration parameters
     config = read_yaml_file('config/parameters.yml')
-    deduplicate_embeddings_config = config['deduplicate_embeddings']
+    embeddings_deduplicator_config = config['embeddings_deduplicator']
 
-    embeddings_file_path = deduplicate_embeddings_config.get('input_embeddings_file_path')
-    embeddings_metadata_file_path = deduplicate_embeddings_config.get('input_embeddings_metadata_file_path')
-    use_l2_similarity = deduplicate_embeddings_config.get('use_l2_similarity')
-    distance_threshold = deduplicate_embeddings_config.get('distance_threshold')
-    output_data_dir = deduplicate_embeddings_config.get('output_data_dir')
-    output_metadata_file_name = deduplicate_embeddings_config.get('output_metadata_file_name')
-    output_embeddings_file_name = deduplicate_embeddings_config.get('output_embeddings_file_name')
+    embeddings_file_path = embeddings_deduplicator_config.get('input_embeddings_file_path')
+    embeddings_metadata_file_path = embeddings_deduplicator_config.get('input_embeddings_metadata_file_path')
+    use_l2_similarity = embeddings_deduplicator_config.get('use_l2_similarity')
+    distance_threshold = embeddings_deduplicator_config.get('distance_threshold')
+    output_data_dir = embeddings_deduplicator_config.get('output_data_dir')
+    output_metadata_file_name = embeddings_deduplicator_config.get('output_metadata_file_name')
+    output_embeddings_file_name = embeddings_deduplicator_config.get('output_embeddings_file_name')
 
     # Loading and validating data
     try:
@@ -191,9 +214,10 @@ def main():
         record2 = {k: v for k, v in record2.items() if k in ['detokenized_chunk', 'url']}
         dist = float(dist)
         duplicate_records[i] = (record1, record2, dist)
-    write_json_file(duplicate_records, 'data/debug/duplicate_records.json')
+    
+    sorted_duplicate_records = sorted(duplicate_records, key=lambda x: x[2])
+    write_json_file(sorted_duplicate_records, 'data/debug/duplicate_records.json')
 
-    # TODO: commits
     # Save the processed data
     if unique_records:
         save_embeddings_and_metadata(
