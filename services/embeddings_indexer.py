@@ -149,6 +149,52 @@ def batch_upsert(index: pinecone.Index, data: List[Tuple[str, List[float], Dict[
     logging.info(f"Upsert completed. Success: {success_count}, Failed: {fail_count}")
 
 
+def index_records(
+    pinecone_api_key: str,
+    pinecone_environment: str,
+    pinecone_index_name: str,
+    embeddings_data: List[Dict[str, Any]],
+    metadata_to_extract: List[str]
+) -> None:
+    """
+    Initializes Pinecone, creates or replaces a Pinecone index, upserts data into the index,
+    and logs index statistics.
+
+    Parameters:
+    - pinecone_api_key (str): The API key for Pinecone.
+    - pinecone_environment (str): The environment for Pinecone.
+    - pinecone_index_name (str): The name of the Pinecone index to create or replace.
+    - embeddings_data (List[Dict[str, Any]]): A list of dictionaries, where each dictionary contains an 'embedding'
+      key with the embedding vector and potentially additional metadata.
+    - metadata_to_extract (List[str]): A list of keys specifying which metadata fields to extract from embeddings_data
+      and include in the upsert operation.
+    TODO: Abstract away the implementation so that Pinecone is loosely coupled with the rest of the code.
+    """
+    # Initialize Pinecone
+    pinecone.init(api_key=pinecone_api_key, environment=pinecone_environment)
+
+    # Creating or replacing a Pinecone index
+    embeddings_dimensions = len(embeddings_data[0]['embedding'])
+    index = replace_or_create_pinecone_index(pinecone_index_name, embeddings_dimensions)
+
+    # Upserting data into Pinecone
+    upsert_data = prepare_upsert_data(embeddings_data, metadata_to_extract)
+    batch_upsert(index, upsert_data, batch_size=1, one_by_one=True)
+
+    # Logging Pinecone index statistics
+    index_stats = index.describe_index_stats()
+    namespace_details = ', '.join([f"Namespace '{ns}': {stats['vector_count']} vectors" for ns, stats in index_stats['namespaces'].items()])
+    log_message = (
+        f"Pinecone Index Statistics:\n"
+        f" - Dimensionality: {index_stats['dimension']} (Each vector has {index_stats['dimension']} elements)\n"
+        f" - Index Fullness: {index_stats['index_fullness']:.2%} (Percentage of the index's total capacity used)\n"
+        f" - Total Vector Count: {index_stats['total_vector_count']} (Total number of vectors stored in the index)\n"
+        f" - Namespaces: {len(index_stats['namespaces'])} (Number of distinct namespaces)\n"
+        f"   - Details: {namespace_details}"
+    )
+
+    logging.info(log_message)
+
 def main():
     # TODO: Write the docstring as in respectful_scraper.py
     logging.basicConfig(level=logging.INFO)
@@ -157,13 +203,13 @@ def main():
 
     # Configuration parameters
     config = read_yaml_file('config/parameters.yml')
-    indexing_embeddings_config = config['indexing_embeddings']
+    embeddings_indexer_config = config['embeddings_indexer']
 
-    embeddings_file_path = indexing_embeddings_config.get('embeddings_file_path')
-    embeddings_metadata_file_path = indexing_embeddings_config.get('embeddings_metadata_file_path')
-    metadata_to_extract = indexing_embeddings_config.get('metadata_fields_to_extract')
-    index_name = indexing_embeddings_config.get('pinecone_index_name')
-    pinecone_environment = indexing_embeddings_config.get('pinecone_environment')
+    embeddings_file_path = embeddings_indexer_config.get('embeddings_file_path')
+    embeddings_metadata_file_path = embeddings_indexer_config.get('embeddings_metadata_file_path')
+    metadata_to_extract = embeddings_indexer_config.get('metadata_fields_to_extract')
+    index_name = embeddings_indexer_config.get('pinecone_index_name')
+    pinecone_environment = embeddings_indexer_config.get('pinecone_environment')
     pinecone_api_key = os.getenv('PINECONE_API_KEY')
 
     logging.info(f"Processing files:\n{embeddings_file_path}\n{embeddings_metadata_file_path}")
