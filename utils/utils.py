@@ -1,9 +1,14 @@
+# Standard library imports
+import datetime
 import json
-import os
 import logging
-import yaml
+import os
+from typing import Any, Dict, List
+
+# Related third-party imports
 import h5py
-from typing import List, Dict, Any
+import yaml
+
 
 def read_json_file(file_path: str) -> List[Dict[str, Any]]:
     """
@@ -25,23 +30,23 @@ def read_json_file(file_path: str) -> List[Dict[str, Any]]:
     except IOError as e:
         raise IOError(f"Error reading JSON file: {e}")
 
-def write_json_file(data: List[dict], output_file_path: str, timestamp: str = None):
+def write_json_file(data: List[dict], file_path: str, timestamp: str = None):
     """
     Writes the given data to a JSON file. Optionally appends a timestamp to the filename.
 
     Args:
         data (List[dict]): The data to write.
-        output_file_path (str): The file path to write the data to.
+        file_path (str): The file path to write the data to.
         timestamp (str, optional): Timestamp string to append to the filename.
     """
     if timestamp:
-        file_name, file_extension = os.path.splitext(output_file_path)
-        output_file_path = f"{file_name}_{timestamp}{file_extension}"
+        file_name, file_extension = os.path.splitext(file_path)
+        file_path = f"{file_name}_{timestamp}{file_extension}"
 
-    os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
-    with open(output_file_path, 'w', encoding='utf-8') as file:
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, 'w', encoding='utf-8') as file:
         json.dump(data, file, indent=4)
-        logging.info(f"Data written to {output_file_path}")
+        logging.info(f"Data written to {file_path}")
 
 def read_yaml_file(file_path):
     """
@@ -101,7 +106,7 @@ def join_data(records: List[Dict[str, Any]], embeddings: Dict[str, Any]) -> List
         record['embedding'] = embeddings.get(embedding_id, None)  # None if embedding_id is not found
     return records
 
-def validate_embeddings(embeddings_data: List[Dict[str, Any]]) -> None:
+def validate_embedding_dimensions(embeddings_data: List[Dict[str, Any]]) -> None:
     """
     Validates the embeddings in the data of records.
     Ensures that all embeddings have the same dimensions and are of the correct type (float).
@@ -197,3 +202,60 @@ def read_markdown_file(file_path: str) -> str:
         return "File not found."
     except Exception as e:
         return f"An error occurred: {e}"
+
+def prepend_title_and_meta_to_text(data_list: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    Adds 'title' and 'meta_description' before 'text' in each dictionary of a list.
+
+    Args:
+        data_list: List of dictionaries with 'title', 'meta_description', and 'text' keys.
+
+    Returns:
+        The modified list with 'title' and 'meta_description' prepended to 'text'.
+    """
+    for item in data_list:
+        item['text'] = item['title'] + item['meta_description'] + item['text']
+    return data_list
+
+def generate_timestamp():
+    """Generate a current timestamp string."""
+    return datetime.datetime.now().strftime("%d-%m-%Y_%H_%M_%S")
+
+def save_query_results(results: Dict[str, Any], file_path: str, timestamp: str = None) -> None:
+    """
+    Writes query results to a Markdown file at the specified path, optionally appending a timestamp to the filename,
+    and logs the action. The path is assumed to be relative to the script's current working directory.
+
+    Parameters:
+    - results (Dict[str, Any]): The results from the query to be written to the file.
+    - file_path (str): The relative directory and base filename where the query results will be saved.
+    The directory must exist or will be created.
+    - timestamp (str, optional): A string representing the timestamp to append to the filename.
+    If provided, it will be appended before the file extension.
+
+    Returns:
+    None.
+    """
+    # Split the path into directory, base filename, and extension
+    dir_path, filename = os.path.split(file_path)
+    base_filename, extension = os.path.splitext(filename)
+
+    # Ensure the directory exists
+    os.makedirs(dir_path, exist_ok=True)
+    
+    # Construct filename with timestamp
+    if timestamp:
+        filename_with_timestamp = f"{base_filename}_{timestamp}{extension}"
+    else:
+        filename_with_timestamp = f"{base_filename}{extension}"
+    
+    # Construct full path for the file with timestamp
+    full_path_with_timestamp = os.path.join(dir_path, filename_with_timestamp)
+
+    with open(full_path_with_timestamp, 'w') as file:
+        file.write('# Query Results\n\n')
+        for match in results.get('matches', []):  # Safe access to 'matches'
+            file.write(f"## Score: {match['score']:.2f}\n")
+            file.write(f"- **Text**: {match['metadata']['detokenized_chunk']}\n\n")
+
+    logging.info(f"Results have been written to {full_path_with_timestamp}")
