@@ -1,23 +1,19 @@
-# TODO: Organize imports according to PEP 8 standards: standard library imports, 
-# followed by related third-party imports, and then local application/library specific imports.
-
+# Standard library imports
+import copy
 import logging
 import time
-import requests
-import json
 from datetime import datetime
-import os
-import copy
-from config.logging_config import setup_global_logger
-from urllib.robotparser import RobotFileParser
-from urllib.parse import urljoin, urlparse, urlunparse
-from bs4 import BeautifulSoup
 from typing import Set
-from dotenv import load_dotenv
-from utils.utils import write_json_file, read_yaml_file
+from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
 
+# Related third-party imports
+from bs4 import BeautifulSoup
+import requests
 
-# TODO: Make sure at runtime that the requests are only HTTPS
+# Local application/library specific imports
+from config.logging_config import setup_global_logger
+from utils.utils import write_json_file, generate_timestamp, read_yaml_file
 
 
 def fetch_robots_txt(robots_url: str, user_agent: str) -> RobotFileParser:
@@ -132,45 +128,31 @@ def get_internal_links(base_url: str, soup: BeautifulSoup) -> Set[str]:
 
     return links
 
-def extract_text(soup: BeautifulSoup, content_selectors=None) -> str:
+def extract_text(soup: BeautifulSoup) -> str:
     """
-    Extracts and returns the main textual content from a BeautifulSoup object, focusing on specified main content areas.
-    It avoids headers, footers, menus, and other non-essential sections. If the main content is not found using the provided
-    selectors, the function returns an empty string.
+    Extracts and returns the main textual content from a BeautifulSoup object, focusing on semantic HTML elements.
+    It avoids headers, footers, menus, and other non-essential sections by not selecting these elements for text extraction.
 
     Parameters:
     soup (BeautifulSoup): A BeautifulSoup object parsed from a webpage.
-    content_selectors (list, optional): A list of CSS selectors for targeting main content. If not provided, default selectors are used.
 
     Returns:
     str: The extracted textual content as a single string, or an empty string if main content is not found.
-    TODO: Explictily handle dynamic content loaded via JavaScript.
-
     """
-    # Default selectors for main content if none are provided
-    if content_selectors is None:
-        content_selectors = [
-        'article',
-        '.article-content',
-        '.article_body',
-        '.post-content',
-        '.post-body',
-        '.main-content',
-        '.post',
-        'section.content',
-        'main[role="main"]',
-        '.info',
-        'aside',
-        '#main',
-        'div.content',
-        '.text-content',
-        '.entry-content',
-    ]  
+    # List of semantic HTML elements typically used for main content
+    content_elements = ['article', 'main', 'section']
+
+    # Elements to exclude from the text extraction, commonly non-content areas
+    exclude_elements = ['header', 'footer', 'nav', 'aside', 'script', 'style']
 
     main_content = []
-    for selector in content_selectors:
-        elements = soup.select(selector)
-        for element in elements:
+    for tag in content_elements:
+        for element in soup.find_all(tag):
+            # Exclude specific sections within the content elements if needed
+            for exclude_tag in exclude_elements:
+                for excluded in element.find_all(exclude_tag):
+                    excluded.decompose()
+            # Extract and clean text from the remaining content
             main_content.append(element.get_text(separator=' ', strip=True))
 
     if not main_content:
@@ -233,6 +215,9 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
 
     TODO: make sure the unicode characters are decoded before writing to JSON or before indexing in Pinecone.
     """
+
+    metadata = extract_metadata(soup)
+
     exclusion_selectors = [
         '.ad', '.advert', '.advertisement', '#ads', '.ads-banner',
         'header', '.header', '#header',
@@ -251,7 +236,6 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
             elem.extract()
 
     text = extract_text(soup)
-    metadata = extract_metadata(soup)
 
     combined_data = {
         'url': url,
@@ -263,7 +247,7 @@ def scrape_page(soup: BeautifulSoup, url: str) -> dict:
     return combined_data
 
 
-def scrape_website(start_urls, user_agent: str, max_depth: int = 3, request_delay: float = 1) -> dict:
+def scrape_website(start_urls, user_agent: str, max_depth: int = 2, request_delay: float = 1) -> dict:
     """
     Scrapes websites starting from a list of given URLs or a single URL, respecting robots.txt rules, and retrieves text and metadata from each page.
     Note: The usage of a set for managing URLs to visit does not maintain the order of URLs, thereby not supporting ordered scraping methods like breadth-first or depth-first search.
@@ -271,11 +255,16 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, request_dela
     Parameters:
     - start_urls (str or list): The initial URL(s) to start scraping from. Can be a single URL or a list of URLs.
     - user_agent (str): The user agent string to be used for HTTP requests and robots.txt compliance.
-    - max_depth (int, optional): The maximum depth to follow internal links for scraping. Defaults to 3.
     - request_delay (float, optional): Minimal delay in seconds between requests. Defaults to 1 second.
+    - max_depth (int, optional): The maximum depth to follow internal links for scraping. Defaults to 2. Examples:
+      - Depth Level 0: The scraper starts at the `scraping_start_url`. No links from this page are followed.
+      - Depth Level 1: The scraper follows links found on the `scraping_start_url` page, scraping the 
+        content of these linked pages.
+      - Depth Level 2: In addition to level 1, the scraper also reaches links found on the "Depth Level 1" pages,
+        scraping their content as well, and so on.
 
     Returns:
-    - dict: A summary of the scraping process, including counts of pages scraped and visited.
+    - list: A list of dictionaries, each containing the scraped data from a single page. Each dictionary contains the URL, text, and metadata of the page.
 
     Raises:
     - requests.RequestException: If an error occurs during the HTTP request to fetch webpage content.
@@ -284,7 +273,7 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, request_dela
     TODO: Fetch and respect crawl-delay from robots.txt.
     TODO: Consider refactoring to make the function more modular and reusable.
     TODO: Add support for scraping dynamic content loaded via JavaScript.
-    TODO: Concatenate meta description with the fetched text
+    TODO: Make sure at runtime that the requests are only HTTPS.
     """
 
     if not isinstance(start_urls, list):
@@ -330,71 +319,39 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 3, request_dela
                 logging.warning(f"Scraping not allowed for {url}")
                 visited.add(url)
 
-    scraping_result = {
-        'scraped_data': scraped_data,
-        'total_scraped': len(scraped_data),
-        'total_visited': len(visited),
-    }
+    logging.info(f"Scraping completed. Total pages scraped: {len(scraped_data)}")
+    logging.info(f"Total unique pages visited: {len(visited)}")
 
-    logging.info(f"Scraping completed. Total pages scraped: {scraping_result['total_scraped']}")
-    logging.info(f"Total unique pages visited: {scraping_result['total_visited']}")
-
-    return scraping_result
-
-# TODO: rozważyć format tradycyjny tego docstringa typu args, return itp
-# TODO: zadbać o logging poprawnie wykonanego skryptu, progres
+    return scraped_data
 
 def main():
     """
-    Main function to initiate the website scraping process.
-    It only scrapes sites within the same domain as the starting URL.
-
-    The function sets up logging, reads configuration parameters from a YAML file, 
-    and then initiates the scraping process based on these parameters. 
-    It concludes by logging the summary of the scraping results.
-
-    Configuration Parameters:
-    - `scraping_start_url` (str): The URL where the scraping process begins.
-    - `scraping_user_agent` (str): The User-Agent string to be used for HTTP requests. That is, how you introduce youself to the server.
-    - `scraping_max_depth` (int): This parameter determines how deep the scraper will navigate from the 
-      starting URL, following links within the site. It's an integer representing the levels of depth the 
-      scraper will traverse.
-
-      Explanation:
-      - Depth Level 0: The scraper starts at the `scraping_start_url`. No links from this page are followed.
-      - Depth Level 1: The scraper follows links found on the `scraping_start_url` page, scraping the 
-        content of these linked pages.
-      - Depth Level 2: In addition to level 1, the scraper also reaches links found on the "Depth Level 1" pages,
-        scraping their content as well, and so on.
-
-      For example, if `scraping_max_depth` is set to 2, the scraper will scrape the starting page, 
-      the pages linked directly from the starting page, and the pages linked from those pages.
-    - `scraping_request_delay` (float): Delay (in seconds) between consecutive HTTP requests to avoid overloading the server.
-    - `scraping_output_dir` (str): Directory path where the scraped data will be stored.
-
-    Logs:
-    After completion, the function logs:
-    - Total number of pages scraped.
-    - Total number of unique pages visited.
-    - The path to the file where the scraped data is stored.
+    Demonstrates the website scraping process using predefined configuration parameters.
+    
+    Steps:    
+    1. Sets up logging for monitoring the scraping progress.
+    2. Reads configuration from 'config/parameters.yml', which includes the start URL, user agent, 
+      max depth for scraping, request delay, and output directory for storing scraped data.
+    3. Initiates the scraping process and stores the results in the specified output directory.
+    4. Logs the total number of pages scraped and unique pages visited.
+    5. Saves the scraped data to a JSON file in the specified directory.
     """
-    # TODO: setup logging level as a parameter in the config file
+    # Config
     logging.basicConfig(level=logging.INFO)
-    setup_global_logger() 
+    setup_global_logger()
+    timestamp = generate_timestamp()
 
-    # Configuration parameters
-    config = read_yaml_file('config/parameters.yml')
-    website_scraper_config = config['website_scraper']
+    all_parameters = read_yaml_file('config/parameters.yml')
+    config = all_parameters['main_config']
+    file_paths = all_parameters['file_paths']
 
-    start_url = website_scraper_config.get('scraping_start_url')
-    user_agent = website_scraper_config.get('scraping_user_agent')
-    max_depth = website_scraper_config.get('scraping_max_depth')
-    request_delay = website_scraper_config.get('scraping_request_delay')
-    output_dir = website_scraper_config.get('scraping_output_dir')
-
-    # Scraping
-    scraping_result = scrape_website(start_url, user_agent, max_depth, output_dir, request_delay)
-    write_json_file(data=scraping_result['scraped_data'], output_file_path=scraping_result['output_file'])
+    # Scraping website
+    scraped_data = scrape_website(**config['website_scraper'])
+    write_json_file(
+        data=scraped_data,
+        file_path=file_paths['website_scraper']['scraping_output_file_path'],
+        timestamp=timestamp
+        )
 
 
 if __name__ == "__main__":
