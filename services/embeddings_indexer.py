@@ -1,13 +1,44 @@
+"""
+This script is architected for managing and indexing embeddings into a Pinecone vector database, 
+utilizing Pinecone's capabilities for vector similarity search. 3-rd party vector databases, such as Pinecone,
+have out-of-the-box support for similarity search, index managenent, efficient data retrieval, 
+high-dimensional vector storage, and more. This script is designed to levarege these capabilities.
+
+Functional Overview:
+
+- Initializes logging and configures settings through environment variables and YAML configuration files,
+ setting the groundwork for operational transparency and dynamic parameter management.
+- Loads embeddings and their associated metadata, preparing the dataset for indexing, ensuring that data is ready for insertion into Pinecone's vector database.
+- Employs Pinecone for creating or replacing indexes, facilitating efficient vector similarity searches with options for various metrics such as cosine similarity, dot product, and Euclidean distance.
+- Processes and prepares data for upserting into Pinecone, converting metadata to appropriate types and structuring data tuples for Pinecone's API.
+- Conducts batch upsert operations into the Pinecone index, leveraging Pinecone's batch processing capabilities for efficient data insertion and error handling.
+- Provides a comprehensive workflow for indexing records, from initialization and configuration to data preparation and upserting, demonstrating a full lifecycle of vector database management.
+
+Components:
+- replace_or_create_pinecone_index: Manages Pinecone indexes by either creating a new index or replacing an existing one. Sufficient for demo purposes.
+- process_metadata: Processes and filters metadata associated with embeddings, ensuring compatibility and integrity before data insertion into the database.
+- prepare_upsert_data: Prepares embeddings and metadata for upsert operations, structuring data in a Pinecone-compatible format and ensuring data quality.
+- batch_upsert: Handles the insertion of prepared data into Pinecone, offering flexibility in batch size and error logging to optimize performance and reliability.
+- index_records: Orchestrates the entire process of embedding indexing, from environment setup to data upsert, encapsulating the workflow in a single, manageable function.
+
+Usage:
+Can be used as a standalone module. Additionally, the functions are designed to integrate with a larger processing pipeline, 
+as demonstrated in the main orchestrator script (main.py) within this project.
+"""
+
+# Standard library imports
 import logging
 import os
+from typing import Any, Dict, List, Tuple
+
+# Related third-party imports
 import pinecone
-import re
 from dotenv import load_dotenv
-from config.logging_config import setup_global_logger
-from utils.utils import read_json_file, read_yaml_file, load_embeddings, join_data, validate_embeddings
-from typing import List, Tuple, Dict, Any
 from tqdm import tqdm
-from datetime import datetime
+
+# Local application/library specific imports
+from config.logging_config import setup_global_logger
+from utils.utils import join_data, load_embeddings, read_json_file, read_yaml_file
 
 
 def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: str = 'cosine') -> pinecone.Index:
@@ -29,7 +60,7 @@ def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: st
 
     Note:
         This function will delete an existing index with the same name, which might
-        lead to loss of data. Ensure that this behavior is intended before using this function.
+        lead to loss of data.
     """
     if index_name in pinecone.list_indexes():
         pinecone.delete_index(index_name)
@@ -150,24 +181,25 @@ def batch_upsert(index: pinecone.Index, data: List[Tuple[str, List[float], Dict[
 
 
 def index_records(
-    pinecone_api_key: str,
+    embeddings_data: List[Dict[str, Any]],
     pinecone_environment: str,
     pinecone_index_name: str,
-    embeddings_data: List[Dict[str, Any]],
-    metadata_to_extract: List[str]
+    metadata_to_extract: List[str],
+    pinecone_api_key: str
 ) -> None:
     """
     Initializes Pinecone, creates or replaces a Pinecone index, upserts data into the index,
     and logs index statistics.
 
     Parameters:
-    - pinecone_api_key (str): The API key for Pinecone.
-    - pinecone_environment (str): The environment for Pinecone.
-    - pinecone_index_name (str): The name of the Pinecone index to create or replace.
     - embeddings_data (List[Dict[str, Any]]): A list of dictionaries, where each dictionary contains an 'embedding'
       key with the embedding vector and potentially additional metadata.
+    - pinecone_environment (str): The environment for Pinecone.
+    - pinecone_index_name (str): The name of the Pinecone index to create or replace.
     - metadata_to_extract (List[str]): A list of keys specifying which metadata fields to extract from embeddings_data
       and include in the upsert operation.
+    - pinecone_api_key (str): The API key for Pinecone.
+
     TODO: Abstract away the implementation so that Pinecone is loosely coupled with the rest of the code.
     """
     # Initialize Pinecone
@@ -196,57 +228,36 @@ def index_records(
     logging.info(log_message)
 
 def main():
-    # TODO: Write the docstring as in respectful_scraper.py
+    """
+    Demonstrates the capabilities of various functions for 
+    indexing embeddings and their metadata into a Pinecone vector database.
+
+    The process includes the following steps:
+    1. Setup the global logger for logging purposes.
+    2. Load environment variables, particularly the Pinecone API key.
+    3. Read the application's configuration and file paths from a YAML file.
+    4. Load embeddings and their corresponding metadata from specified file paths.
+    5. Join the embeddings and metadata into a single data structure.
+    6. Initialize the Pinecone environment and index the prepared data.
+    """
     logging.basicConfig(level=logging.INFO)
     setup_global_logger()
     load_dotenv()
+    
+    all_parameters = read_yaml_file('config/parameters.yml')
+    config = all_parameters['main_config']
+    file_paths = all_parameters['file_paths']
 
-    # Configuration parameters
-    config = read_yaml_file('config/parameters.yml')
-    embeddings_indexer_config = config['embeddings_indexer']
-
-    embeddings_file_path = embeddings_indexer_config.get('embeddings_file_path')
-    embeddings_metadata_file_path = embeddings_indexer_config.get('embeddings_metadata_file_path')
-    metadata_to_extract = embeddings_indexer_config.get('metadata_fields_to_extract')
-    index_name = embeddings_indexer_config.get('pinecone_index_name')
-    pinecone_environment = embeddings_indexer_config.get('pinecone_environment')
+    # Indexing embeddings
     pinecone_api_key = os.getenv('PINECONE_API_KEY')
-
-    logging.info(f"Processing files:\n{embeddings_file_path}\n{embeddings_metadata_file_path}")
-
-    # Loading and validating data
-    try:
-        embeddings_metadata_json = read_json_file(embeddings_metadata_file_path)
-        embeddings_hdf5 = load_embeddings(embeddings_file_path)
-        embeddings_data = join_data(embeddings_metadata_json, embeddings_hdf5)
-        validate_embeddings(embeddings_data)
-    except Exception as e:
-        raise ValueError(f"Error processing file: {e}")
-
-    pinecone.init(api_key=pinecone_api_key, environment=pinecone_environment)
-
-    # Creating a Pinecone index
-    embeddings_dimensions = len(embeddings_data[0]['embedding'])
-    index = replace_or_create_pinecone_index(index_name, embeddings_dimensions)
-
-    # Upserting data into Pinecone
-    upsert_data = prepare_upsert_data(embeddings_data, metadata_to_extract)
-    batch_upsert(index, upsert_data, batch_size=1, one_by_one=True)
-
-    # Logging Pinecone index statistics
-    index_stats = index.describe_index_stats()
-    namespace_details = ', '.join([f"Namespace '{ns}': {stats['vector_count']} vectors" for ns, stats in index_stats['namespaces'].items()])
-    log_message = (
-        f"Pinecone Index Statistics:\n"
-        f" - Dimensionality: {index_stats['dimension']} (Each vector has {index_stats['dimension']} elements)\n"
-        f" - Index Fullness: {index_stats['index_fullness']:.2%} (Percentage of the index's total capacity used)\n"
-        f" - Total Vector Count: {index_stats['total_vector_count']} (Total number of vectors stored in the index)\n"
-        f" - Namespaces: {len(index_stats['namespaces'])} (Number of distinct namespaces)\n"
-        f"   - Details: {namespace_details}"
-    )
-
-    logging.info(log_message)
-
+    embeddings = load_embeddings(file_paths['embeddings_deduplicator']['input_embeddings_file_path'])
+    metadata = read_json_file(file_paths['embeddings_deduplicator']['input_embeddings_metadata_file_path'])
+    embeddings_with_metadata = join_data(records=metadata, embeddings=embeddings)
+    index_records(
+        embeddings_data=embeddings_with_metadata,
+        **config['embeddings_indexer'],
+        pinecone_api_key=pinecone_api_key,
+        )
 
 if __name__ == "__main__":
     main()
