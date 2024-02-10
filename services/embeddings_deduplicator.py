@@ -1,14 +1,44 @@
-import numpy as np
-import faiss
-import logging
-import os
-import json
-import h5py
-from dotenv import load_dotenv
-from config.logging_config import setup_global_logger
-from typing import List, Tuple, Callable, Dict, Any
-from utils.utils import read_json_file, read_yaml_file, load_embeddings, join_data, validate_embeddings, save_embeddings_and_metadata, write_json_file
+"""
+This script is designed for the deduplication of embeddings, leveraging the power of FAISS (Facebook AI Similarity Search) 
+for efficient similarity search and numpy for numerical operations. It aims to identify and remove duplicate records 
+within a dataset based on the similarity of their embeddings.
 
+Functional Overview:
+- Initializes logging and configures settings through environment variables and YAML files.
+- Loads embeddings along with their metadata, preparing the dataset for deduplication.
+- Utilizes FAISS for building an index of embeddings, enabling efficient similarity searches.
+- Identifies duplicate embeddings based on a configurable similarity threshold and metric.
+- Processes and removes identified duplicates, ensuring a dataset of unique embeddings.
+- Saves the deduplicated dataset and a detailed report of the duplicates for review.
+
+Components:
+- `build_faiss_index`: Constructs a FAISS index with the choice of L2 norm or inner product for similarity measures.
+- `validate_embeddings`: Validates the integrity of embeddings post-deduplication against the original dataset.
+- `process_and_sort_duplicates`: Sorts identified duplicate records by their similarity measure for easier analysis.
+- `deduplicate_embeddings`: The core function that orchestrates the deduplication process, leveraging FAISS for efficient similarity searches and threshold-based duplicate identification.
+- Utility functions for configuration reading, data loading, and result saving are integral to the workflow.
+
+Usage:
+Can be used as a standalone module. Additionally, the functions are designed to integrate with a larger processing pipeline, 
+as demonstrated in the main orchestrator script (main.py) within this project.
+"""
+
+# Standard library imports
+import logging
+from typing import Dict, List, Tuple
+
+# Related third-party imports
+import faiss
+import numpy as np
+
+# Local application/library specific imports
+from config.logging_config import setup_global_logger
+from utils.utils import (
+    join_data, load_embeddings, read_json_file, read_yaml_file, 
+    save_embeddings_and_metadata, 
+    write_json_file, 
+    generate_timestamp
+)
 
 def build_faiss_index(vectors: np.ndarray, use_l2: bool = True) -> faiss.IndexFlat:
     """
@@ -26,6 +56,55 @@ def build_faiss_index(vectors: np.ndarray, use_l2: bool = True) -> faiss.IndexFl
     index.add(vectors)
     return index
 
+def validate_embeddings(original: List[Dict[str, any]], truncated: List[Dict[str, any]]) -> None:
+    """
+    Verifies that each record in the truncated list has a corresponding record in the original list with a matching embedding,
+    using embedding_id as a unique identifier. Raises an error if a mismatch or missing embedding_id is found.
+    
+    Args:
+    - original (List[Dict[str, any]]): The original list of dictionaries containing embedding information.
+    - truncated (List[Dict[str, any]]): The truncated list of dictionaries to compare against the original list.
+    
+    Raises:
+    - ValueError: If an embedding_id does not have a corresponding record in the original list or if the embedding values do not closely match.
+    
+    Returns:
+    - None
+    """
+    original_by_id = {item['embedding_id']: item for item in original}
+    
+    for item in truncated:
+        embedding_id = item['embedding_id']
+        
+        if embedding_id not in original_by_id:
+            raise ValueError(f"Unexpected error. Record embedding_id: {embedding_id} not found in original data.")
+        
+        if not np.allclose(np.array(item['embedding']), np.array(original_by_id[embedding_id]['embedding']), atol=1e-8):
+            raise ValueError(f"Embeddings do not closely match for record with embedding_id: {embedding_id}.")
+
+    logging.debug("Sanity check passed: All deduplicated embeddings match their original records.")
+
+def process_and_sort_duplicates(duplicate_records):
+    """
+    Function made to inspect what records were considered duplicate.
+    Extracts only the relevant information from the duplicate records
+    and sorts them based on the distance.
+
+    Args:
+        duplicate_records (list of tuples): A list containing tuples of (record1, record2, dist).
+
+    Returns:
+        list: Sorted list of duplicate records based on the distance.
+    """
+    for i, (record1, record2, dist) in enumerate(duplicate_records):
+        record1 = {k: v for k, v in record1.items() if k in ['detokenized_chunk', 'url']}
+        record2 = {k: v for k, v in record2.items() if k in ['detokenized_chunk', 'url']}
+        dist = float(dist)
+        duplicate_records[i] = (record1, record2, dist)
+
+    sorted_duplicate_records = sorted(duplicate_records, key=lambda x: x[2])
+    return sorted_duplicate_records
+
 def deduplicate_embeddings(records: List[dict], use_l2_similarity: bool, threshold: float) -> Tuple[List[dict], List[Tuple[dict, dict, float]]]:
     """
     Identify and remove duplicate records based on embedding similarity using FAISS.
@@ -36,6 +115,8 @@ def deduplicate_embeddings(records: List[dict], use_l2_similarity: bool, thresho
     (using L2 or other similarity based on `use_l2_similarity`) is less than a specified threshold. 
     In each pair of duplicates, the record with the larger index is removed. 
     The function iterates until no more duplicates are found.
+    It also performs a sanity check to ensure that the deduplicated embeddings are correctly
+    joined back to their metadata.
 
     Parameters:
     - records (List[dict]): A list of dictionaries, where each dictionary represents a record and must contain an 'embedding' key with a vector value.
@@ -55,6 +136,7 @@ def deduplicate_embeddings(records: List[dict], use_l2_similarity: bool, thresho
     TODO: update docstring
     TODO: test if use_l2_similarity is working
     """
+    original_records = records
     original_records_length = len(records)
     duplicate_records = []
     duplicates_found = True
@@ -81,153 +163,53 @@ def deduplicate_embeddings(records: List[dict], use_l2_similarity: bool, thresho
 
     n_of_duplicates = original_records_length - len(records)
     logging.info(f'{n_of_duplicates} duplicates found and removed from {original_records_length} records, resulting in {len(records)} unique records.')
+    validate_embeddings(original=original_records, truncated=records)
     return records, duplicate_records
 
-# TODO: delete this function
-def check_faiss_alignment(records: List[dict], index: faiss.IndexFlat) -> bool:
-    """
-    Check if the vectors in the FAISS index correspond to the vectors in the records list.
-
-    Args:
-    records (List[dict]): List of records, each containing an 'embedding' field.
-    index (faiss.IndexFlat): FAISS index containing the vectors.
-
-    Returns:
-    bool: True if the alignment is correct, False otherwise.
-    """
-    
-    # Retrieve a few sample vectors from the FAISS index
-    sample_indices = np.random.choice(len(records), size=min(10, len(records)), replace=False)
-    for i in sample_indices:
-        i = int(i)  # Ensure the index is an integer
-        # Retrieve the vector from the FAISS index
-        faiss_vector = np.zeros(index.d, dtype=np.float32)
-        index.reconstruct(i, faiss_vector)
-
-        # Compare with the corresponding vector in the records list
-        record_vector = np.array(records[i]['embedding'], dtype=np.float32)
-        if not np.allclose(faiss_vector, record_vector, atol=1e-6):
-            return False
-
-    return True
-
-
-def check_join_success(processed_data: List[Dict[str, any]], original_data: List[Dict[str, any]]) -> None:
-    """
-    Runtime sanity check function.
-    Verifies that each record in processed_data has a corresponding record in original_data with a matching embedding.
-    Uses numpy.allclose to compare embeddings for floating-point precision tolerance.
-
-    Parameters:
-    processed_data (List[Dict[str, any]]): A list of dictionaries, each representing a processed record.
-    original_data (List[Dict[str, any]]): A list of dictionaries, each representing an original record.
-
-    Raises:
-    ValueError: If any record in processed_data does not have a corresponding record in original_data with a matching embedding.
-
-    Returns:
-    None
-    """
-
-    for record in processed_data:
-        record_embedding = record['embedding']
-        record_id = record['embedding_id']
-
-        # Find the corresponding record in the original data.
-        original_record = next((rec for rec in original_data if rec['embedding_id'] == record_id), None)
-
-        # Compare embeddings using numpy.allclose
-        if original_record is None:
-            raise ValueError(f"Unexpected error. Record embedding_id: {record_id} not found in original data.")
-        elif not np.allclose(original_record['embedding'], record_embedding):
-            raise ValueError(f"Embeddings do not match for record with embedding_id: {record_id}.")
-
-    # TODO: change to logging.debug
-    logging.info("Join of deduplicated embeddings back to the records was successful.")
-
-def process_and_sort_duplicates(duplicate_records):
-    """
-    Function made to inspect what records were considered duplicate.
-    Extracts only the relevant information from the duplicate records
-    and sorts them based on the distance.
-
-    Args:
-        duplicate_records (list of tuples): A list containing tuples of (record1, record2, dist).
-
-    Returns:
-        list: Sorted list of duplicate records based on the distance.
-    """
-    for i, (record1, record2, dist) in enumerate(duplicate_records):
-        record1 = {k: v for k, v in record1.items() if k in ['detokenized_chunk', 'url']}
-        record2 = {k: v for k, v in record2.items() if k in ['detokenized_chunk', 'url']}
-        dist = float(dist)
-        duplicate_records[i] = (record1, record2, dist)
-
-    sorted_duplicate_records = sorted(duplicate_records, key=lambda x: x[2])
-    return sorted_duplicate_records
-
-
-
 def main():
+    """
+    Demonstrates the capabilities of various functions for embeddings deduplication.
+
+    Steps:
+    1. Configuration setup, including logging and environment variables.
+    2. Reads parameters and file paths from a YAML configuration file.
+    3. Loads embeddings and their metadata from specified file paths.
+    4. Joins embeddings with metadata to form a comprehensive dataset.
+    5. Deduplicates the dataset based on embedding similarity, using configurable parameters for similarity metrics and threshold.
+    6. Sorts and processes duplicate records for inspection.
+    7. Writes the sorted duplicate records to a JSON file with a timestamp for tracking.
+    8. Saves the unique records (embeddings and metadata) to a specified directory, also timestamped.
+    
+    """
+    # Config
     logging.basicConfig(level=logging.INFO)
     setup_global_logger()
-    load_dotenv()
+    timestamp = generate_timestamp()
 
-    # Configuration parameters
-    config = read_yaml_file('config/parameters.yml')
-    embeddings_deduplicator_config = config['embeddings_deduplicator']
+    all_parameters = read_yaml_file('config/parameters.yml')
+    config = all_parameters['main_config']
+    file_paths = all_parameters['file_paths']
 
-    embeddings_file_path = embeddings_deduplicator_config.get('input_embeddings_file_path')
-    embeddings_metadata_file_path = embeddings_deduplicator_config.get('input_embeddings_metadata_file_path')
-    use_l2_similarity = embeddings_deduplicator_config.get('use_l2_similarity')
-    distance_threshold = embeddings_deduplicator_config.get('distance_threshold')
-    output_data_dir = embeddings_deduplicator_config.get('output_data_dir')
-    output_metadata_file_name = embeddings_deduplicator_config.get('output_metadata_file_name')
-    output_embeddings_file_name = embeddings_deduplicator_config.get('output_embeddings_file_name')
-
-    # Loading and validating data
-    try:
-        embeddings_metadata_json = read_json_file(embeddings_metadata_file_path)
-        embeddings_hdf5 = load_embeddings(embeddings_file_path)
-        embeddings_data = join_data(embeddings_metadata_json, embeddings_hdf5)
-        validate_embeddings(embeddings_data)
-    except Exception as e:
-        raise ValueError(f"Error processing file: {e}")
-
-    # TODO: remove root/repos from the path
-    logging.info(f"Processing files:\n{embeddings_file_path}\n{embeddings_metadata_file_path}")
-    logging.info(f"Deduplicating {len(embeddings_data)} records...")
-
+    # Deduplicating embeddings
+    embeddings = load_embeddings(file_paths['embeddings_deduplicator']['input_embeddings_file_path'])
+    metadata = read_json_file(file_paths['embeddings_deduplicator']['input_embeddings_metadata_file_path'])
+    embeddings_with_metadata = join_data(records=metadata, embeddings=embeddings)
     unique_records, duplicate_records = deduplicate_embeddings(
-        records=embeddings_data,
-        use_l2_similarity=use_l2_similarity, 
-        threshold=distance_threshold
+    records=embeddings_with_metadata,
+    **config['embeddings_deduplicator'],
+    )
+    sorted_duplicate_records = process_and_sort_duplicates(duplicate_records)
+    write_json_file(
+        data=sorted_duplicate_records,
+        file_path=file_paths['embeddings_deduplicator']['output_duplicate_records_file_path'],
+        timestamp=timestamp
+        )
+    save_embeddings_and_metadata(
+        data=unique_records,
+        data_dir=file_paths['embeddings_deduplicator']['output_embeddings_deduplicated_data_dir'],
+        timestamp=timestamp
         )
 
-    # Check alignment between original records and processed records
-    check_join_success(processed_data=unique_records, original_data=embeddings_data)
-
-    # Check which duplicate_records were considered duplicates
-    # TODO: remove or run only in debug mode
-    for i, (record1, record2, dist) in enumerate(duplicate_records):
-        record1 = {k: v for k, v in record1.items() if k in ['detokenized_chunk', 'url']}
-        record2 = {k: v for k, v in record2.items() if k in ['detokenized_chunk', 'url']}
-        dist = float(dist)
-        duplicate_records[i] = (record1, record2, dist)
-    
-    sorted_duplicate_records = sorted(duplicate_records, key=lambda x: x[2])
-    write_json_file(sorted_duplicate_records, 'data/debug/duplicate_records.json')
-
-    # Save the processed data
-    if unique_records:
-        save_embeddings_and_metadata(
-            data=unique_records,
-            data_dir=output_data_dir,
-            metadata_file_name=output_metadata_file_name,
-            embeddings_file_name=output_embeddings_file_name
-            )
-    else:
-        logging.critical("No data to save. Possibly all records are duplicates.")
 
 if __name__ == '__main__':
     main()
