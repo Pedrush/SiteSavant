@@ -1,0 +1,50 @@
+main_config:
+  website_scraper:
+    start_urls: &start_urls "https://www.example.com/"
+    user_agent: ""
+    request_delay: 1.5 # in seconds, don't set it too low to avoid overloading the server and getting banned
+    max_depth: 1
+  embeddings_creator:
+    max_embedding_model_input_length: 200
+    embedding_type: "search_document"
+    embedding_model_name: &embedding_model_name "embed-multilingual-v3.0"
+    minimum_chunk_length_in_tokens: 10
+  embeddings_deduplicator:
+    use_l2_similarity: True
+    threshold: 0.1
+  embeddings_indexer:
+    pinecone_environment: &pinecone_env "gcp-starter"
+    pinecone_index_name: &pinecone_index_name "sitesavant"
+    metadata_to_extract: ['url', 'scrape_timestamp', 'title', 'meta_description', 'detokenized_chunk']
+  query_handler:
+    user_query: &user_query ""
+    model_name: *embedding_model_name
+    pinecone_environment: *pinecone_env
+    index_name: *pinecone_index_name
+    top_k: 5 # how many results to return
+  chatbot_interactor:
+    user_query: *user_query
+    url: *start_urls
+    model_name: "gpt-3.5-turbo-0301"
+
+# Note: Input file paths are not used by the main orchestrator script,
+# they are only used by the demo scripts
+file_paths:
+  website_scraper:
+    output_scraping_file_path: data/scraped_data/scraped_data.json
+  embeddings_creator:
+    input_scraped_data_file_path: data/scraped_data/None.json # Only demo
+    output_embeddings_processed_data_dir: data/processed_data
+  embeddings_deduplicator:
+    input_embeddings_file_path: data/processed_data/None.h5 # Only demo
+    input_embeddings_metadata_file_path: data/processed_data/None.json # Only demo
+    output_embeddings_deduplicated_data_dir: data/deduplicated_data
+    output_duplicate_records_file_path: data/debug/duplicate_records.json    
+  embeddings_indexer:
+    input_embeddings_file_path: data/deduplicated_data/None.h5 # Only demo
+    input_embeddings_metadata_file_path: data/deduplicated_data/None.json # Only demo
+  query_handler:
+    output_query_results_file_path: data/query_results/query_results.md
+  chatbot_interactor:
+    input_query_results_file_path: data/query_results/None.md # Only demo
+
