@@ -33,18 +33,18 @@ file_paths:
   website_scraper:
     output_scraping_file_path: data/scraped_data/scraped_data.json
   embeddings_creator:
-    input_scraped_data_file_path: data/scraped_data/None.json # Only demo
+    input_scraped_data_file_path: data/scraped_data/None.json
     output_embeddings_processed_data_dir: data/processed_data
   embeddings_deduplicator:
-    input_embeddings_file_path: data/processed_data/None.h5 # Only demo
-    input_embeddings_metadata_file_path: data/processed_data/None.json # Only demo
+    input_embeddings_file_path: data/processed_data/None.h5
+    input_embeddings_metadata_file_path: data/processed_data/None.json
     output_embeddings_deduplicated_data_dir: data/deduplicated_data
     output_duplicate_records_file_path: data/debug/duplicate_records.json    
   embeddings_indexer:
-    input_embeddings_file_path: data/deduplicated_data/None.h5 # Only demo
-    input_embeddings_metadata_file_path: data/deduplicated_data/None.json # Only demo
+    input_embeddings_file_path: data/deduplicated_data/None.h5
+    input_embeddings_metadata_file_path: data/deduplicated_data/None.json
   query_handler:
     output_query_results_file_path: data/query_results/query_results.md
   chatbot_interactor:
-    input_query_results_file_path: data/query_results/None.md # Only demo
+    input_query_results_file_path: data/query_results/None.md
 
