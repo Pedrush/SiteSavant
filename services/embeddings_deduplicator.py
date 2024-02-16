@@ -47,6 +47,7 @@ def build_faiss_index(vectors: np.ndarray, use_l2: bool = True) -> faiss.IndexFl
     Args:
         vectors: An array of vectors to index.
         use_l2: Whether to use L2 norm for indexing. Defaults to True.
+        If False, inner product is used instead.
 
     Returns:
         The constructed FAISS index.
@@ -84,7 +85,7 @@ def validate_embeddings(original: List[Dict[str, any]], truncated: List[Dict[str
 
     logging.debug("Sanity check passed: All deduplicated embeddings match their original records.")
 
-def process_and_sort_duplicates(duplicate_records):
+def process_and_sort_duplicates(duplicate_records : List[Tuple[Dict[str, any], Dict[str, any], float]]) -> List[Tuple[Dict[str, any], Dict[str, any], float]]:
     """
     Function made to inspect what records were considered duplicate.
     Extracts only the relevant information from the duplicate records
@@ -107,34 +108,28 @@ def process_and_sort_duplicates(duplicate_records):
 
 def deduplicate_embeddings(records: List[dict], use_l2_similarity: bool, threshold: float) -> Tuple[List[dict], List[Tuple[dict, dict, float]]]:
     """
-    Identify and remove duplicate records based on embedding similarity using FAISS.
+    Deduplicates records based on the similarity of their embeddings using a FAISS index.
 
-    This function iterates over a list of records, each containing an 'embedding' field.
-    It builds a FAISS index based on these embeddings and finds duplicates.
-    Two records are considered duplicates if the distance between their embeddings
-    (using L2 or other similarity based on `use_l2_similarity`) is less than a specified threshold. 
-    In each pair of duplicates, the record with the larger index is removed. 
-    The function iterates until no more duplicates are found.
-    It also performs a sanity check to ensure that the deduplicated embeddings are correctly
-    joined back to their metadata.
+    This function processes a list of records, each containing an embedding, to identify and remove duplicates. 
+    A FAISS index is constructed from the embeddings, and pairwise similarity is computed. Records are considered duplicates 
+    if their similarity (L2 distance if `use_l2_similarity` is True, inner product otherwise) is below a specified
+    threshold. For each pair of duplicate records, the one with the larger index in the list is removed.
+    The process repeats until no more duplicates are found. This function also ensures that the final set of deduplicated 
+    records is consistent with their original metadata.
 
     Parameters:
-    - records (List[dict]): A list of dictionaries, where each dictionary represents a record and must contain an 'embedding' key with a vector value.
-    - use_l2_similarity (bool): Flag to use L2 similarity for FAISS index. If False, another similarity metric is used.
-    - threshold (float): A threshold for determining duplicates. Two embeddings are considered duplicates if their distance is less than this threshold.
+    - records (List[dict]): A list of dictionaries, each containing an 'embedding' key with its associated vector.
+    - use_l2_similarity (bool): If True, use L2 distance as the similarity metric; otherwise, inner product is uesed.
+    - threshold (float): The distance threshold below which two embeddings are considered duplicates.
 
     Returns:
-    - Tuple[List[dict], List[Tuple[dict, dict, float]]]: A tuple containing two elements:
-        1. A list of dictionaries, representing the unique records after removing duplicates.
-        2. A list of tuples (record[i], record[j], distance), where each tuple represents a pair
-        of indices from the original list identified as duplicates, along with their distance. The record at index j (the larger index) is removed.
+    - Tuple[List[dict], List[Tuple[dict, dict, float]]]: A tuple where the first element is a list of deduplicated records, 
+      and the second element is a list of tuples, each representing a pair of duplicate records and their similarity score. 
+      The second record in each tuple is the one that was removed.
 
-    Example:
+    Example usage:
     >>> records = [{'id': 1, 'embedding': [0.1, 0.2]}, {'id': 2, 'embedding': [0.1, 0.2]}, {'id': 3, 'embedding': [0.3, 0.4]}]
-    >>> unique_records, duplicates = embeddings_deduplicator(records, True, 0.05)
-    TODO: Optimise computationally
-    TODO: update docstring
-    TODO: test if use_l2_similarity is working
+    >>> unique_records, duplicates = deduplicate_embeddings(records, True, 0.05)
     """
     original_records = records
     original_records_length = len(records)
