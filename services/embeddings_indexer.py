@@ -29,6 +29,7 @@ as demonstrated in the main orchestrator script (main.py) within this project.
 # Standard library imports
 import logging
 import os
+import time
 from typing import Any, Dict, List, Tuple
 
 # Related third-party imports
@@ -47,7 +48,7 @@ def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: st
 
     This function first checks if an index with the given name already exists.
     If it does, the existing index is deleted. Then, a new index with the specified
-    parameters is created.
+    parameters is created. Such approach is compatible with free Pinecone account.
 
     Args:
         index_name (str): The name of the index to create or replace.
@@ -61,6 +62,8 @@ def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: st
     Note:
         This function will delete an existing index with the same name, which might
         lead to loss of data.
+    TODO: Implement a more sophisticated index management strategy.
+    TODO: Instead of time.sleep, use a more robust method to ensure the index is created.
     """
     if index_name in pinecone.list_indexes():
         pinecone.delete_index(index_name)
@@ -68,7 +71,7 @@ def replace_or_create_pinecone_index(index_name: str, dimension: int, metric: st
 
     pinecone.create_index(index_name, dimension=dimension, metric=metric)
     logging.info(f"New Pineconce index '{index_name}' created with dimension {dimension} and metric {metric}.")
-
+    time.sleep(15)
     return pinecone.Index(index_name)
 
 
@@ -211,7 +214,8 @@ def index_records(
 
     # Upserting data into Pinecone
     upsert_data = prepare_upsert_data(embeddings_data, metadata_to_extract)
-    batch_upsert(index, upsert_data, batch_size=1, one_by_one=True)
+    # TODO: Make batch_size and one_by_one configurable from the configuration file
+    batch_upsert(index, upsert_data, batch_size=100, one_by_one=False)
 
     # Logging Pinecone index statistics
     index_stats = index.describe_index_stats()
@@ -250,8 +254,8 @@ def main():
 
     # Indexing embeddings
     pinecone_api_key = os.getenv('PINECONE_API_KEY')
-    embeddings = load_embeddings(file_paths['embeddings_deduplicator']['input_embeddings_file_path'])
-    metadata = read_json_file(file_paths['embeddings_deduplicator']['input_embeddings_metadata_file_path'])
+    embeddings = load_embeddings(file_paths['embeddings_indexer']['input_embeddings_file_path'])
+    metadata = read_json_file(file_paths['embeddings_indexer']['input_embeddings_metadata_file_path'])
     embeddings_with_metadata = join_data(records=metadata, embeddings=embeddings)
     index_records(
         embeddings_data=embeddings_with_metadata,
