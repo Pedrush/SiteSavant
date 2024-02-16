@@ -1,3 +1,32 @@
+"""
+This script is designed for scraping websites in a respectful manner, adhering to robots.txt policies
+and extracting  information from web pages. It leverages the 'BeautifulSoup' for parsing HTML content and 'requests' for HTTP interactions.
+
+Functional Overview:
+
+- Sets up a global logging configuration to monitor and log the scraping process.
+- Fetches and parses robots.txt files to respect website crawling restrictions.
+- Determines scraping permissions for URLs based on the robots.txt file, ensuring compliance with website policies.
+- Extracts internal links, text content, and metadata from web pages, focusing on semantic HTML elements to capture relevant information.
+- Utilizes a session-based approach with requests to efficiently manage HTTP connections and headers, reducing overhead and improving speed.
+- Supports configurable depth-based scraping, allowing users to specify how deep the scraper should navigate from the starting URLs.
+- Implements delay between requests to respect server load and prevent unethical, aggressive scraping behavior.
+- Saves scraped data in a structured JSON format.
+
+Components:
+- fetch_robots_txt: Fetches and parses a website's robots.txt file, determining access permissions for the scraper.
+- can_fetch: Checks whether scraping a particular URL is allowed, using the parsed robots.txt rules.
+- get_internal_links: Extracts all internal links from a webpage, enabling depth-based scraping.
+- extract_text: Captures the main textual content from a webpage, excluding common non-content areas like headers and footers.
+- extract_metadata: Extracts basic metadata such as the page title, meta description, and headings from a webpage.
+- scrape_page: Combines text and metadata extraction to gather comprehensive information from a single webpage.
+- scrape_website: Orchestrates the scraping process, managing URL queues, respecting robots.txt rules, and collecting data from multiple pages.
+- Utility functions for reading configuration, writing JSON files, and generating timestamps support the scraping workflow.
+
+Usage:
+Can be used as a standalone module. Additionally, the functions are designed to integrate with a larger processing pipeline, 
+as demonstrated in the main orchestrator script (main.py) within this project."""
+
 # Standard library imports
 import copy
 import logging
@@ -148,7 +177,6 @@ def extract_text(soup: BeautifulSoup) -> str:
     main_content = []
     for tag in content_elements:
         for element in soup.find_all(tag):
-            # Exclude specific sections within the content elements if needed
             for exclude_tag in exclude_elements:
                 for excluded in element.find_all(exclude_tag):
                     excluded.decompose()
@@ -269,12 +297,16 @@ def scrape_website(start_urls, user_agent: str, max_depth: int = 2, request_dela
     Raises:
     - requests.RequestException: If an error occurs during the HTTP request to fetch webpage content.
     - Exception: For any other unexpected errors during the scraping process.
+    TODO: Make sure the consistent type of start_urls parameter is enforced.
     TODO: Fetch and parse sitemap.xml to get a list of URLs to scrape.
     TODO: Fetch and respect crawl-delay from robots.txt.
     TODO: Consider refactoring to make the function more modular and reusable.
     TODO: Add support for scraping dynamic content loaded via JavaScript.
     TODO: Make sure at runtime that the requests are only HTTPS.
     """
+
+    if not start_urls.startswith(('http://', 'https://')):
+        start_urls = 'https://' + start_urls
 
     if not isinstance(start_urls, list):
         start_urls = [start_urls]
@@ -349,7 +381,7 @@ def main():
     scraped_data = scrape_website(**config['website_scraper'])
     write_json_file(
         data=scraped_data,
-        file_path=file_paths['website_scraper']['scraping_output_file_path'],
+        file_path=file_paths['website_scraper']['output_scraping_file_path'],
         timestamp=timestamp
         )
 
