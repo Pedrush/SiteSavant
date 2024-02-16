@@ -50,23 +50,21 @@ def generate_chat_response(query_results: str, user_query: str, url: str, model_
     TODO: make the prompt as a system messsage not user message
     """
 
-    # Construct the chat prompt
     prompt = ChatPromptTemplate.from_template(
         "You're SiteSavant, a digital assistant trained to give answers based on specific "
-        "information retrieved from websites. If the provided information is insufficient to "
-        "answer the query, tell the user that you don't know the answer and suggest what to do next. "
+        "information retrieved from websites. If the provided information is insufficient "
+        "to answer the query, tell the user that you don't know the answer and suggest what to do next. "
+
         "Provided Information:\n"
         "{query_results}\n"
-        "Based on this information, answer the following query:\n{user_query}"
+        "Based on relevant information, answer completely and accurately only the following query:\n{user_query}"
     )
-    # Initialize the model and output parser
+
     model = ChatOpenAI(model=model_name)
     output_parser = StrOutputParser()
 
-    # Chain the processing steps
     chain = prompt | model | output_parser
 
-    # Invoke the chain with the provided arguments
     result = chain.invoke({"url": url, "query_results": query_results, "user_query": user_query})
 
     return result

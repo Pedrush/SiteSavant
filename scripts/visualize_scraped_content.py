@@ -15,7 +15,6 @@ def main():
     input_json_file_path = 'data/scraped_data/scraped_data_08-02-2024_21_50_37.json'
     output_markdown_file_path = 'data/debug/scraped_text_visualization.md'
 
-    # Load JSON data from the file
     try:
         with open(input_json_file_path, 'r') as file:
             data = json.load(file)
@@ -23,7 +22,6 @@ def main():
         print(f"File not found: {input_json_file_path}")
         data = []
 
-    # Write to Markdown file
     with open(output_markdown_file_path, 'w') as file:
         for item in data:
             file.write(f"## [{item['title']}]({item['url']})\n\n")
