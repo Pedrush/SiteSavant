@@ -39,7 +39,7 @@ This guide will help you set up and run SiteSavant on your local machine for dev
 First, clone the SiteSavant repository to your local machine:
 
 ```bash
-git clone https://github.com/yourgithub/sitesavant.git
+git clone https://github.com/glueish/sitesavant.git
 cd sitesavant
 ```
 
