@@ -210,7 +210,7 @@ def embed_file_contents(json_data: dict, text_processor: TextProcessingService, 
     """
 
     processed_data = []
-    for i, record in tqdm(enumerate(json_data), desc="Processing records"):
+    for i, record in tqdm(enumerate(json_data), desc="Processing records", total=len(json_data)):
         text = record.get("text", "")
         if text:
             try:
