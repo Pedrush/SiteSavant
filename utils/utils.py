@@ -205,16 +205,28 @@ def read_markdown_file(file_path: str) -> str:
 
 def prepend_title_and_meta_to_text(data_list: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """
-    Adds 'title' and 'meta_description' before 'text' in each dictionary of a list.
+    Adds 'title', 'meta_description' and 'text' in each dictionary of a list, ignoring non-string types.
+    
+    This function iterates over each item in the provided list, checks if 'title', 'meta_description', and 'text'
+    are strings, and then concatenates available string values before 'text'. It modifies the 'text' field in-place
+    for each dictionary.
 
     Args:
-        data_list: List of dictionaries with 'title', 'meta_description', and 'text' keys.
+        data_list: List of dictionaries with potential 'title', 'meta_description', and 'text' keys.
 
     Returns:
-        The modified list with 'title' and 'meta_description' prepended to 'text'.
+        The modified list with 'title' and 'meta_description' prepended to 'text' where applicable.
     """
+    
     for item in data_list:
-        item['text'] = item['title'] + item['meta_description'] + item['text']
+        components = []
+
+        for key in ['title', 'meta_description', 'text']:
+            if isinstance(item.get(key), str):
+                components.append(item[key])
+
+        item['text'] = ''.join(components)
+
     return data_list
 
 def generate_timestamp():
@@ -243,13 +255,11 @@ def save_query_results(results: Dict[str, Any], file_path: str, timestamp: str =
     # Ensure the directory exists
     os.makedirs(dir_path, exist_ok=True)
     
-    # Construct filename with timestamp
     if timestamp:
         filename_with_timestamp = f"{base_filename}_{timestamp}{extension}"
     else:
         filename_with_timestamp = f"{base_filename}{extension}"
     
-    # Construct full path for the file with timestamp
     full_path_with_timestamp = os.path.join(dir_path, filename_with_timestamp)
 
     with open(full_path_with_timestamp, 'w') as file:
