@@ -4,6 +4,10 @@
 
 SiteSavant is a chatbot application designed to provide on-demand information from any website. It works by scraping the content of a target website and initializing a chatbot over this data. The app leverages vector similarity techniques to fetch the most relevant data in response to user queries. This ensures that each interaction with the chatbot is informed by the context information from the website, enabling accurate and relevant answers. In essence, SiteSavant is a [Retrieval-Augmented Generation (RAG)](https://arxiv.org/abs/2005.11401) app with the added complexity of web scraping.
 
+
+https://github.com/Glueish/SiteSavant/assets/87642985/001e5a44-70a1-4139-a5cf-4a76869cafca
+
+
 ## Detailed workflow
 
 ### 1. **Web Scraping**
