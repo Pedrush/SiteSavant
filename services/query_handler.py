@@ -49,11 +49,10 @@ def parse_query_results(query_results: Dict[str, Any]) -> str:
     Returns:
     str: A single string containing all 'detokenized_chunk' texts concatenated together, separated by '\n\n'.
     """
-    # Initialize an empty list to store detokenized chunks
     detokenized_chunks = []
 
     # Iterate over each match to extract the 'detokenized_chunk'
-    for match in query_results.get('matches', []):  # Safe access to 'matches'
+    for match in query_results.get('matches', []):
         detokenized_chunk = match.get('metadata', {}).get('detokenized_chunk', '')
         if detokenized_chunk:  # Ensure the chunk is not empty
             detokenized_chunks.append(detokenized_chunk)
