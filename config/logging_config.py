@@ -1,7 +1,8 @@
 import logging
 
+
 class CustomFormatter(logging.Formatter):
-    """ Custom formatter to add color to log levels. """
+    """Custom formatter to add color to log levels."""
 
     # ANSI escape codes for various colors
     RED = "\033[31m"
@@ -14,7 +15,7 @@ class CustomFormatter(logging.Formatter):
         logging.ERROR: RED,
         logging.WARNING: YELLOW,
         logging.INFO: GREEN,
-        logging.DEBUG: RESET
+        logging.DEBUG: RESET,
     }
 
     def format(self, record):
@@ -22,10 +23,9 @@ class CustomFormatter(logging.Formatter):
         message = super().format(record)
         return f"{color}{message}{self.RESET}"
 
+
 def setup_global_logger():
-    """
-    Set up the global logging configuration with a custom formatter.
-    """
+    """Set up the global logging configuration with a custom formatter."""
     formatter = CustomFormatter("%(levelname)s: %(message)s")
 
     # Configure the root logger
