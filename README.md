@@ -11,7 +11,7 @@ https://github.com/Glueish/SiteSavant/assets/87642985/001e5a44-70a1-4139-a5cf-4a
 ## Detailed workflow
 
 ### 1. **Web Scraping**
-Automatically collects data from specified URL. Functionalities are defined and documented in the `services/website_scraper.py`
+The app automatically collects data from a specified URL, continuing to scrape the website for text information up to a user-defined depth. Functionalities are defined and documented in the `services/website_scraper.py`
 
 ### 2. **Creating Embeddings**
 Next, the collected text segments are transformed into high-dimensional vectors through a process called "embedding". This step converts the text into a numerical format that represents its meaning, facilitating efficient retrieval of information later. This feature currently integrates exclusively with the [Cohere](https://cohere.com/) API, with its functions detailed in `services/embeddings_creator.py`.
