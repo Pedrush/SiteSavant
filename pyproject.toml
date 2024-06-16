@@ -2,7 +2,7 @@
 name = "sitesavant"
 version = "1.0.0"
 description = ""
-authors = ["Piotr Ząbek <p.zabek01@gmail.com>"]
+authors = ["Piotr Ząbek <sitesavant@outlook.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
