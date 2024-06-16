@@ -1,6 +1,6 @@
 # SiteSavant
 
-### *A chatbot for any website on-demand.*
+### *An on-demand chatbot for any website.*
 
 SiteSavant is a chatbot application designed to provide on-demand information from any website. It works by scraping the content of a target website and initializing a chatbot over this data. The app leverages vector similarity techniques to fetch the most relevant data in response to user queries. This ensures that each interaction with the chatbot is informed by the context information from the website, enabling accurate and relevant answers. In essence, SiteSavant is a [Retrieval-Augmented Generation (RAG)](https://arxiv.org/abs/2005.11401) app with the added complexity of web scraping.
 
@@ -134,11 +134,11 @@ The quality of the Information Retrieval (IR) pipeline is the biggest bottleneck
 1. **Introduce Redundancy:** Compressing the meaning of a paragraph into a vector is a lossy compression. It's fundamentally flawed because long paragraphs can dilute the meaning excessively, and too short paragraphs may not be meaningful enough themselves. Additionally, the embedded paragraph might end before completing important information. Solutions include embedding smaller chunks and attaching more surrounding context upon retrieval. Also, consider introducing redundancy in two ways: creating two indexes with embeddings of different lengths and searching both during query time. Moreover, consider a chunking strategy that allows chunks to overlap, adding another layer of redundancy.
 1. **RAPTOR:** To enhance the contextual understanding of retrieved data, implement RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval [[Twitter summary](https://twitter.com/bindureddy/status/1753994930366930953)] [[Paper](https://arxiv.org/abs/2401.18059)].
 1. **Lost in the Middle effect:** LLMs tend to pay less attention to information placed in the middle of the prompt (called [Lost in the Middle effect](https://cs.stanford.edu/~nfliu/papers/lost-in-the-middle.arxiv2023.pdf)). Thus, RAG applications could improve by positioning the most relevant, retrieved context information at the beginning and the end of the prompt. This strategy is essentially an additional reranking step. For instance, in terms of relevance, the ranked text chunks could be arranged in the prompt as 1, 4, 5, 3, 2 instead of the sequential 1, 2, 3, 4, 5.
+1. **Embed Summaries:** In some cases, embeddings can be improved by generating them from summarized text instead of raw text. For example,  information extracted from emails.
 1. **Evaluation:** Evaluate the Information Retrieval (IR) quality using out-of-the-box solutions such as Elasticsearch and managed vector stores like Pinecone. Utilize metrics such as Normalized Discounted Cumulative Gain (NDCG), Discounted Cumulative Gain (DCG), Mean Reciprocal Rank (MRR), Precision, Recall, and Average Precision/Recall for assessment. Consider Langsmith for experiment tracking.
 1. **Scalable Framework:** Transition to a suitable framework enabling pipeline creation such as Luigi, Apache Airflow, or Kedro to enhance the project's scalability.
 1. **Integrations:** Integrate with other vector database and model providers, potentially by enhancing integration with LangChain.
 1. **LangChain:** Integrate closely with LangChain, leveraging its growing community and expanding features.
-1. **Embed Summaries:** In some cases, embeddings can be improved by generating them from summarized text instead of raw text. For example,  information extracted from emails.
 1. **Robust Testing:** Develop tests, in spite of their [nondeterministic and flaky nature](https://austinhenley.com/blog/copilotpainpoints.html#:~:text=Testing%20is%20fundamental%20to%20software%20development%20but%20arduous%20when%20LLMs%20are%20involved).
 
 ## Final remarks
